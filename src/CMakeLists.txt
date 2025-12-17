@@ -138,8 +138,6 @@ list(
   oops/base/IdentityMatrix.h
   oops/base/Increment.h
   oops/base/Increment4D.h
-  oops/base/IncrementEnsemble.h
-  oops/base/IncrementEnsemble4D.h
   oops/base/IncrementSet.h
   oops/base/Inflation.h
   oops/base/InflationBase.h
@@ -188,8 +186,6 @@ list(
   oops/base/SamplingMethodSelector.h
   oops/base/State.h
   oops/base/State4D.h
-  oops/base/StateEnsemble.h
-  oops/base/StateEnsemble4D.h
   oops/base/StateInfo.h
   oops/base/StateSaver.h
   oops/base/StateSet.h

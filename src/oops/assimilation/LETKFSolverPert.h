@@ -34,7 +34,6 @@ class StochasticLETKF : public DeterministicLETKF<MODEL, OBS> {
   typedef IncrementSet<MODEL>         IncrementSet_;
   typedef ObsSpaces<OBS>              ObsSpaces_;
   typedef StateSet<MODEL>             StateSet_;
-  typedef StateEnsemble4D<MODEL>      StateEnsemble4D_;
 
  public:
   static const std::string classname() {return "oops::StochasticLETKF";}
@@ -43,7 +42,7 @@ class StochasticLETKF : public DeterministicLETKF<MODEL, OBS> {
   StochasticLETKF(ObsSpaces_ &, const Geometry_ &, const eckit::Configuration &, size_t,
                   const StateSet_ &, const Variables &);
 
-  Observations_ computeHofX(const StateEnsemble4D_ &, size_t, bool) override;
+  Observations_ computeHofX(const StateSet_ &, size_t, bool) override;
 
   /// KF update + posterior inflation at a grid point location (GeometryIterator_)
   void measurementUpdate(const Eigen::VectorXd &,
@@ -125,7 +124,7 @@ StochasticLETKF<MODEL, OBS>::StochasticLETKF(ObsSpaces_ & obspaces, const Geomet
 
 // -----------------------------------------------------------------------------
 template <typename MODEL, typename OBS>
-Observations<OBS> StochasticLETKF<MODEL, OBS>::computeHofX(const StateEnsemble4D_ & ens_xx,
+Observations<OBS> StochasticLETKF<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
                                                        size_t iteration, bool readFromFile) {
   util::Timer timer(classname(), "computeHofX");
 

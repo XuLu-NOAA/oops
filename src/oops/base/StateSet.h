@@ -128,6 +128,35 @@ StateSet<MODEL>::StateSet(const Geometry_ & resol, const StateSet & other)
 // -----------------------------------------------------------------------------
 
 template<typename MODEL>
+StateSet<MODEL>::StateSet(const std::vector<StateSet> & locals, const int & ensNum)
+  : DataSetBase<State_, Geometry_>(locals.front().times(),
+                            locals.front().commTime(),
+                            [&locals]() {
+                              std::vector<int> ids(locals.size());
+                              for (size_t i = 0; i < locals.size(); ++i) ids[i] = static_cast<int>(i);
+                                return ids;
+                            }(),
+                            oops::mpi::myself())
+{
+  Log::trace() << "StateSet::StateSet from vector start" << std::endl;
+  ASSERT(locals.size() > 0);
+  // All locals are expected to have single-ensemble layout with identical times
+  for (size_t jm = 0; jm < locals.size(); ++jm) {
+    ASSERT(locals[jm].ens_size() == 1);
+    ASSERT(locals[jm].times() == locals.front().times());
+    for (size_t jt = 0; jt < locals[jm].time_size(); ++jt) {
+      // Copy construct state from local holder
+      this->dataset().emplace_back(std::make_unique<State_>(locals[jm](jt, 0)));
+    }
+  }
+  this->sync_times();
+  this->check_consistency();
+  Log::trace() << "StateSet::StateSet from vector done" << std::endl;
+}
+
+// -----------------------------------------------------------------------------
+
+template<typename MODEL>
 std::vector<StateSet<MODEL> > StateSet<MODEL>::transpose(const eckit::mpi::Comm & global,
            const Geometry_ & DAgeometry, const int ensNum) const
 {
