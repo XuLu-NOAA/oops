@@ -433,7 +433,7 @@ void DataSetBase<DATA, GEOM>::write(const eckit::Configuration & config) const {
     } else {
       ASSERT(ntimes_ == 1);
       eckit::LocalConfiguration writeConf(config);
-      if (nmembers_ > 1) writeConf.set("member", mymembers_[jm]);
+      if (nmembers_ > 1) writeConf.set("member", mymembers_[jm]+1);
       this->data(0, jm).write(writeConf);
     }
   }

@@ -54,7 +54,6 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
   typedef ModelAuxControl<MODEL>           ModelAux_;
   typedef StateSet<MODEL>                  StateSet_;
   typedef State<MODEL>                     State_;
-  typedef StateSet<MODEL>                  StateEnsemble4D_;
 
  public:
 // -----------------------------------------------------------------------------
@@ -75,13 +74,12 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     // Instantiate ens_xx depending on whether we are running inline or not
     auto ens_xx = [&] {
       if (fullConfig.getBool("Run Inline", false)) {
-        std::vector<StateSet_> localVec = localizeEnsembleFC(fullConfig, geometry);
-        auto object = StateEnsemble4D_(localVec, 0);
+        auto object = localizeEnsembleFC(fullConfig, geometry);
         return object;
       } else {
         geometry = std::make_unique<Geometry_>(eckit::LocalConfiguration(fullConfig, "geometry"),
                                                this->getComm());
-        auto object = StateEnsemble4D_(*geometry, eckit::LocalConfiguration(fullConfig,
+        auto object = StateSet_(*geometry, eckit::LocalConfiguration(fullConfig,
                                                                             "background"));
         return object;
       }
@@ -340,7 +338,7 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
 
 // -----------------------------------------------------------------------------
 
-  std::vector<StateSet_> localizeEnsembleFC(const eckit::Configuration & fullConfig,
+  StateSet_ localizeEnsembleFC(const eckit::Configuration & fullConfig,
           std::unique_ptr<Geometry_> & DAgeometry) const {
   // This function creates a DA geometry that has the same resolution as the forecast geometry, but
   // is decomposed into patches that are N times smaller than the forecast geometry, where N is the
@@ -348,12 +346,8 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
   // forecast layout. (e.g. DA layout = 4,4, FC layout = 2,2, N = 4)
   // Also note that DA layout nx * ny = FC layout nx * ny * N
   // Next, this will run a set of ensemble forecasts (or read in previously computed forecasts)
-  // then "localize" the State variables and return a StateEnsemble4D object with all of the state
-  // variables on the local ensemble of the StateSet held by the StateEnsemble4D variable returned
-  // Note that there is considerable duplication between StateSet and StateEnsemble4D classes, but
-  // the functionality is not simply transferred from one to another. As a result, the data from
-  // the forecasts is converted into a StateEnsemble4D variable for compatibility with previous
-  // LocalEnsembleSolver functionality.
+  // then "localize" the State variables and return a StateSet object with all of the state
+  // variables on the local ensemble of the StateSet held by the StateSet variable returned
 
     // Get the MPI partition
 
@@ -427,24 +421,23 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
         new StateSetSaver<MODEL>(memberConf, FCgeometry, times, oops::mpi::myself(),
                     ens, patchMember);
     post.enrollProcessor(saver_);
-  //  Each member uses a different configuration:
+    //  Each member uses a different configuration:
     for (int m = 1; m <= nmembers; ++m) {
       if ( m == mymember ) {
-         Log::info() << "running on mymember = " << mymember  << " " << mytask << std::endl;
-         executeForecast(FCgeometry, memberConf, post);
-         Log::info() << "Done with ens execute\n";
-       }
-       if ( batchSize > 0 ) {  // don't divide by zero
-         if (m % batchSize == 0) oops::mpi::world().barrier();
-       }
-     }
-     oops::mpi::world().barrier();
-     ens_SS = std::move(saver_->getStateSet());
+        Log::info() << "running on mymember = " << mymember  << " " << mytask << std::endl;
+        executeForecast(FCgeometry, memberConf, post);
+        Log::info() << "Done with ens execute\n";
+      }
+      if ( batchSize > 0 ) {  // don't divide by zero
+        if (m % batchSize == 0) oops::mpi::world().barrier();
+      }
+    }
+    oops::mpi::world().barrier();
+    ens_SS = std::move(saver_->getStateSet());
 
     // just finished the forecast on FCgeometry that has N times bigger patches than global DAgeom
     // Pull the values from the local FCgeometry and put them into DAgeom
-     std::vector<StateSet_> localVec = ens_SS->transpose(this->getComm(), *DAgeometry,
-       mymember);
+    StateSet_ localVec = ens_SS->transpose(this->getComm(), *DAgeometry, mymember);
     return(localVec);
   }
 

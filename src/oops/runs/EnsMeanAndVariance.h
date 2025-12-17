@@ -42,11 +42,10 @@ template <typename MODEL> class EnsMeanAndVariance : public Application {
 
 //  Setup ensemble of states
     eckit::LocalConfiguration ensConf(fullConfig, "ensemble");
-    StateSet_ stateEnsemble(resol, ensConf);
+    const StateSet_ stateEnsemble(resol, ensConf);
     const StateSet_ ensmean = stateEnsemble.ens_mean();
     // Convert StateSet to IncrementSet for variance calculation and free stateEnsemble memory
-    const IncrementSet_ ensemble(resol, stateEnsemble.variables(), stateEnsemble,
-                                 /*clearStates*/ true);
+    const IncrementSet_ ensemble(resol, stateEnsemble.variables(), stateEnsemble);
     const IncrementSet_ sigb2 = ensemble.ens_var();
 
 //  Write mean to file

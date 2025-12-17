@@ -116,13 +116,9 @@ template <typename MODEL> class ConvertToStructuredGrid : public Application {
       Geometry_ resol_(eckit::LocalConfiguration(incEns, "increment geometry"), this->getComm());
       const Variables vars(incEns, "increment variables");
       eckit::LocalConfiguration incsConf(incEns, "increments");
-      // Build a single time slot from config date
       const util::DateTime tt(incsConf.getString("date"));
       std::vector<util::DateTime> times{tt};
-      IncrementSet_ incrementsToInterp_(resol_, vars, times, oops::mpi::myself(),
-                                        /*members*/std::vector<int>{0});
-      // Reconstruct full set via read-constructor to honor members/template
-      incrementsToInterp_ = IncrementSet_(resol_, vars, times, incsConf, oops::mpi::myself());
+      IncrementSet_ incrementsToInterp_(resol_, vars, times, incsConf, oops::mpi::myself());
       const eckit::LocalConfiguration structuredgridConf(incEns, "structured grid interpolation");
       const StructuredGridGridWriter_ structuredGridWriter_(structuredgridConf, resol_);
       size_t numstates = incrementsToInterp_.ens_size();
