@@ -48,6 +48,11 @@ class StateSet : public DataSetBase< State<MODEL>, Geometry<MODEL> > {
   // across communicators
   StateSet(const Geometry_ &, const StateSet &);
   StateSet(const StateSet &) = default;
+  StateSet(const std::vector<util::DateTime> & times,
+           const eckit::mpi::Comm & commTime,
+           const std::vector<int> & members, const eckit::mpi::Comm & commEns,
+           const std::vector<std::shared_ptr<State_>> & dataset);
+
   // Calculate the ensemble mean and return a new StateSet variable
   StateSet ens_mean() const;
   // Collect distributed states and return a local subset
@@ -83,7 +88,6 @@ StateSet<MODEL>::StateSet(const Geometry_ & resol,
   this->check_consistency();
   Log::trace() << "StateSet::StateSet" << std::endl;
 }
-
 
 // -----------------------------------------------------------------------------
 template<typename MODEL>
@@ -152,6 +156,17 @@ StateSet<MODEL> StateSet<MODEL>::transpose(const eckit::mpi::Comm & global,
     }
   }
   return(local);
+}
+
+// -----------------------------------------------------------------------------
+
+template<typename MODEL>
+StateSet<MODEL>::StateSet(const std::vector<util::DateTime> & times,
+                          const eckit::mpi::Comm & commTime,
+                          const std::vector<int> & members, const eckit::mpi::Comm & commEns,
+                          const std::vector<std::shared_ptr<State_>> & dataset)
+  : DataSetBase<State_, Geometry_>(times, commTime, members, commEns, dataset) {
+  Log::trace() << "StateSet::StateSet from dataset done" << std::endl;
 }
 
 // -----------------------------------------------------------------------------
