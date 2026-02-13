@@ -116,6 +116,7 @@ list(
   oops/base/DolphChebyshev.cc
   oops/base/DolphChebyshev.h
   oops/base/EnsembleCovariance.h
+  oops/base/EnsembleObservers.h
   oops/base/FieldSet3D.cc
   oops/base/FieldSet3D.h
   oops/base/FieldSet4D.cc
@@ -148,6 +149,7 @@ list(
   oops/base/Model.h
   oops/base/ModelBase.h
   oops/base/ModelSpaceCovarianceBase.h
+  oops/base/ModulatedEnsembleObservers.h
   oops/base/MultiplicativeInflation.h
   oops/base/ObsAuxControls.h
   oops/base/ObsAuxCovariances.h

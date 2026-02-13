@@ -20,8 +20,10 @@
 #include "oops/assimilation/instantiateLocalEnsembleSolverFactory.h"
 #include "oops/assimilation/LocalEnsembleSolver.h"
 #include "oops/base/Departures.h"
+#include "oops/base/EnsembleObservers.h"
 #include "oops/base/Geometry.h"
 #include "oops/base/Increment.h"
+#include "oops/base/ModulatedEnsembleObservers.h"
 #include "oops/base/Observations.h"
 #include "oops/base/ObsSpaces.h"
 #include "oops/base/StateSet.h"
@@ -120,10 +122,8 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
 
     util::printRunStats("LocalEnsembleDA before solver ctor");
 
-    // set up solver
-    std::unique_ptr<LocalSolver_> solver =
-         LocalEnsembleSolverFactory<MODEL, OBS>::create(obsdb, *geometry, fullConfig,
-                                                        nens, bkg_mean, incvars);
+    // set up observers
+    EnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens);
 
     // test prints for the prior ensemble
     bool do_test_prints = fullConfig.getBool("driver.do test prints", true);
@@ -139,17 +139,12 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     util::printRunStats("LocalEnsembleDA before computeHofX");
 
     // compute H(x)
-    Observations_ yobs(obsdb, "ObsValue");
-    Observations_ yb_mean = solver->computeHofX(ens_xx, 0,
-                              fullConfig.getBool("driver.read HX from disk", false));
-    if (do_test_prints) {
-       Log::test() << "H(x) ensemble background mean: " << std::endl << yb_mean << std::endl;
-    }
-
-    Departures_ ombg(yobs - yb_mean);
-    ombg.save("ombg");
-    if (do_test_prints) {
-       Log::test() << "background y - H(x): " << std::endl << ombg << std::endl;
+    const std::string solverType = fullConfig.getString("local ensemble DA.solver");
+    if (solverType.find("GETKF") != std::string::npos) {
+      ModulatedEnsembleObservers<MODEL, OBS> modEnsembleObservers(obsdb, *geometry, fullConfig, nens, bkg_mean, incvars);
+      modEnsembleObservers.computeHofX(ens_xx, bkg_mean, 0);
+    } else {
+      ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
     }
 
     // quit early if running in observer-only mode
@@ -157,6 +152,8 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
       obsdb.save();
       return 0;
     }
+
+//    obsdb.redistribute(obsConfig);
 
     // print background mean
     if (do_test_prints) {
@@ -177,6 +174,10 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     Log::info() << "Beginning core local solver..." << std::endl;
     util::printRunStats("LocalEnsembleDA before solver", true);
 
+        // set up solver
+    std::unique_ptr<LocalSolver_> solver =
+         LocalEnsembleSolverFactory<MODEL, OBS>::create(obsdb, *geometry, fullConfig,
+                                                        nens, bkg_mean, incvars);
     solver->measurementUpdate(bkg_pert, ana_pert);
 
     // wait all tasks to finish their solution, so the timing for functions below reports
@@ -310,20 +311,7 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     if (fullConfig.getBool("driver.do posterior observer", true)) {
       // need to create a posterior solver that stores ana_mean internally.
       // This is needed if linear observer is used, because it is linearized arround this mean
-      std::unique_ptr<LocalSolver_> posteriorSolver =
-         LocalEnsembleSolverFactory<MODEL, OBS>::create(obsdb, *geometry, fullConfig,
-                                                        nens, ana_mean, incvars);
-      Observations_ ya_mean = posteriorSolver->computeHofX(ens_xx, 1, false);
-      Log::test() << "H(x) ensemble analysis mean: " << std::endl << ya_mean << std::endl;
-
-      // calculate analysis obs departures
-      Departures_ oman(yobs - ya_mean);
-      oman.save("oman");
-      Log::test() << "analysis y - H(x): " << std::endl << oman << std::endl;
-
-      // display overall background/analysis RMS stats
-      Log::test() << "ombg RMS: " << ombg.rms() << std::endl
-                << "oman RMS: " << oman.rms() << std::endl;
+      ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
     }
 
     // Save the obsspace only if an hofx was calculated
