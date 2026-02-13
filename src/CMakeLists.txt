@@ -329,7 +329,6 @@ list(
   oops/runs/HofX4D.h
   oops/runs/HybridGain.h
   oops/runs/InterpolateStateBetweenModels.h
-  oops/runs/LinearizationError.h
   oops/runs/LocalEnsembleDA.h
   oops/runs/Run.cc
   oops/runs/Run.h
