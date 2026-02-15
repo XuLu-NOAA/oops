@@ -153,7 +153,7 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
       return 0;
     }
 
-//    obsdb.redistribute(obsConfig);
+    obsdb.redistribute(obsConfig);
 
     // print background mean
     if (do_test_prints) {
@@ -494,16 +494,16 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
 
     if (obsConfigs.size() > 0) {
       for (auto & conf : obsConfigs) {
-        conf.set("obs space.distribution.center", patchCenter);
-        conf.set("obs space.distribution.radius", patchRadius);
+        conf.set("obs space.redistribution.center", patchCenter);
+        conf.set("obs space.redistribution.radius", patchRadius);
       }
 
       eckit::LocalConfiguration tmp;
       tmp.set("observers", obsConfigs);
       obsConfig = tmp.getSubConfiguration("observers");
     } else {
-      obsConfig.set("obs space.distribution.center", patchCenter);
-      obsConfig.set("obs space.distribution.radius", patchRadius);
+      obsConfig.set("obs space.redistribution.center", patchCenter);
+      obsConfig.set("obs space.redistribution.radius", patchRadius);
     }
   }
 
