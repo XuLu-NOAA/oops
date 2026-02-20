@@ -122,9 +122,6 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
 
     util::printRunStats("LocalEnsembleDA before solver ctor");
 
-    // set up observers
-    EnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens);
-
     // test prints for the prior ensemble
     bool do_test_prints = fullConfig.getBool("driver.do test prints", true);
     if (do_test_prints) {
@@ -144,6 +141,8 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
       ModulatedEnsembleObservers<MODEL, OBS> modEnsembleObservers(obsdb, *geometry, fullConfig, nens, bkg_mean, incvars);
       modEnsembleObservers.computeHofX(ens_xx, bkg_mean, 0);
     } else {
+      // set up observers
+      EnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens);
       ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
     }
 
@@ -311,6 +310,7 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     if (fullConfig.getBool("driver.do posterior observer", true)) {
       // need to create a posterior solver that stores ana_mean internally.
       // This is needed if linear observer is used, because it is linearized arround this mean
+      EnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens);
       ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
     }
 

@@ -229,17 +229,12 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
   }
   Observations_ yobs(obspaces_, "ObsValue");
   omb_ = yobs - ybmean_;
-  oops::Log::info() << " before create obserrors" << std::endl;
   R_.reset(new ObsErrors_(this->observersconf_, this->obspaces_));
-  oops::Log::info() << " after create obserrors" << std::endl;
   Observations_ obserr(obspaces_, "EffectiveError0");
-  oops::Log::info() << " after read effectiveerror0" << std::endl;
   for (size_t jj = 0; jj < R_->size(); ++jj) {
     (*R_)[jj].update(obserr[jj]);
   }
-  oops::Log::info() << " after update obserrors with effectiveerror0" << std::endl;
   invVarR_ = std::make_unique<Departures_>(R_->inverseVariance());
-  oops::Log::info() << " obs err (invvar): " << *invVarR_ << std::endl;
   oops::Log::trace() << "LocalEnsembleSolver created" << std::endl;
 }
 
@@ -259,14 +254,12 @@ void LocalEnsembleSolver<MODEL, OBS>::measurementUpdate
     R_->localize(locvector);
 
     if (local_omb_vec.size() == 0) {
-      oops::Log::info() << " no need for update, just copy" << std::endl;
       // no obs. so no need to update Wa_ and wa_
       // ana_pert[i] = bkg_pert[i]
       this->copyLocalIncrement(bkg_pert,
                                i,
                                ana_pert);
     } else {
-      oops::Log::info() << " updating" << std::endl;
       this->measurementUpdate(local_omb_vec,
                               *R_,
                               locvector,
