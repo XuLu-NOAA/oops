@@ -67,10 +67,10 @@ class LocalEnsembleSolver {
   typedef Observations<OBS>           Observations_;
   typedef ObsLocalizations<MODEL, OBS> ObsLocalizations_;
   typedef ObsSpaces<OBS>              ObsSpaces_;
-  typedef StateSet<MODEL>             StateSet_;
   typedef PseudoModelState4D<MODEL>   PseudoModel_;
   typedef PseudoLinearModelIncrement4D<MODEL> PseudoLinearModel_;
   typedef State<MODEL>                State_;
+  typedef StateSet<MODEL>             StateSet_;
   typedef State4D<MODEL>              State4D_;
   typedef Increment<MODEL>            Increment_;
   typedef Increment4D<MODEL>          Increment4D_;
@@ -200,14 +200,14 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
       Log::info() << "RTPP inflation will be applied with rtppCoeff=" <<
                     rtpp << std::endl;
   } else {
-      Log::info() << "RTPP inflation is not applied rtppCoeff is out of bounds (0,1], rtppCoeff="
+      Log::info() << "RTPP not applied: rtppCoeff is out of bounds (0,1], rtppCoeff="
                   << rtpp << std::endl;
   }
-  if (rtps > 0.0 && rtps <= 1.0) {
+  if (rtps > 0.0) {
     Log::info() << "RTPS inflation will be applied with rtpsCoeff=" <<
                     rtps << std::endl;
   } else {
-    Log::info() << "RTPS inflation is not applied rtpsCoeff is out of bounds (0,1], rtpsCoeff="
+    Log::info() << "RTPS not applied: rtpsCoeff is <=0, rtpsCoeff="
                 << rtps << std::endl;
   }
 
