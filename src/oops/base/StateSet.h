@@ -55,6 +55,11 @@ class StateSet : public DataSetBase< State<MODEL>, Geometry<MODEL> > {
 
   // Calculate the ensemble mean and return a new StateSet variable
   StateSet ens_mean() const;
+  /// Re-create all member states as copies of \p pattern (a single-member set
+  /// with the same time layout, e.g. the ensemble mean). Can be used after the
+  /// member states have been released (e.g. by the perturbation constructor of
+  /// IncrementSet with clearStates set).
+  void resetMembers(const StateSet & pattern);
   // Collect distributed states and return a local subset
   StateSet transpose(const eckit::mpi::Comm & global,
            const Geometry_ & DAgeometry, const int ensNum) const;
@@ -167,6 +172,22 @@ StateSet<MODEL>::StateSet(const std::vector<util::DateTime> & times,
                           const std::vector<std::shared_ptr<State_>> & dataset)
   : DataSetBase<State_, Geometry_>(times, commTime, members, commEns, dataset) {
   Log::trace() << "StateSet::StateSet from dataset done" << std::endl;
+}
+
+// -----------------------------------------------------------------------------
+
+template<typename MODEL>
+void StateSet<MODEL>::resetMembers(const StateSet & pattern) {
+  ASSERT(pattern.local_ens_size() == 1);
+  ASSERT(pattern.local_time_size() == this->local_time_size());
+  this->dataset().clear();
+  for (size_t jm = 0; jm < this->local_ens_size(); ++jm) {
+    for (size_t jt = 0; jt < this->local_time_size(); ++jt) {
+      this->dataset().emplace_back(std::make_shared<State_>(pattern[jt]));
+    }
+  }
+  this->check_consistency();
+  Log::trace() << "StateSet::resetMembers done" << std::endl;
 }
 
 // -----------------------------------------------------------------------------

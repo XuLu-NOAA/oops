@@ -166,12 +166,28 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     std::vector<int> members(nens);
     std::iota(members.begin(), members.end(), 0);
 
-    // calculate background ensemble perturbations
-    IncrementSet_ bkg_pert(ens_xx, bkg_mean, incvars, members);
+    // The analysis member states are needed after the solver update only to
+    // write out the posterior ensemble and/or to run the posterior observer.
+    const bool needAnaStates =
+        fullConfig.getBool("driver.save posterior ensemble", true) ||
+        fullConfig.getBool("driver.do posterior observer", true);
+    // The prior member states are not needed during the (memory intensive)
+    // solver update if the analysis members can be re-created afterwards from
+    // the mean and the analysis perturbations (increment variables spanning
+    // the full state), or if the analysis member states are not needed at all
+    // (e.g. only analysis increments are written out). In these cases release
+    // each member state as soon as its perturbation has been computed, to
+    // remove one full copy of the ensemble from the solver's peak memory.
+    const bool releaseEnsemble = (incvars == statevars) || !needAnaStates;
 
     // initialize empty analysis perturbations
+    // (constructed before the background perturbations: it queries the
+    // ensemble times, which must happen before the member states are released)
     IncrementSet_ ana_pert(*geometry, incvars, ens_xx.times(), ens_xx.commTime(),
                            members);
+
+    // calculate background ensemble perturbations
+    IncrementSet_ bkg_pert(ens_xx, bkg_mean, incvars, members, releaseEnsemble);
 
     // run the solver at each gridpoint
     Log::info() << "Beginning core local solver..." << std::endl;
@@ -185,17 +201,13 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
 
     Log::info() << "Local solver completed." << std::endl;
     util::printRunStats("LocalEnsembleDA after solver", true);
-    // calculate final analysis states
-    if (incvars == statevars) {
-      // Initialize each ensemble member state from the background mean (per time slot)
-      for (size_t jj = 0; jj < nens; ++jj) {
-        for (size_t itime = 0; itime < ens_xx.time_size(); ++itime) {
-          ens_xx(itime, jj) = bkg_mean[itime];
-        }
-      }
-      // Apply all analysis perturbations across the ensemble/time set
+    // calculate final analysis states (only when they are needed downstream)
+    if (releaseEnsemble && needAnaStates) {
+      // Re-create each ensemble member state from the background mean and
+      // apply all analysis perturbations across the ensemble/time set
+      ens_xx.resetMembers(bkg_mean);
       ens_xx += ana_pert;
-    } else {
+    } else if (!releaseEnsemble) {
       // When increment variables differ, apply net analysis perturbations set-wise
       // by first forming analysis increments relative to background perturbations.
       IncrementSet_ net_ana(ana_pert);
@@ -224,8 +236,13 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
       }
     }
 
-    // save the posterior mean
-    StateSet_ ana_mean = ens_xx.ens_mean();   // calculate analysis mean
+    // calculate analysis mean; when the analysis member states were not
+    // re-created, compute it as background mean + ensemble mean of the
+    // analysis perturbations (mathematically equivalent)
+    StateSet_ ana_mean = needAnaStates ? ens_xx.ens_mean() : bkg_mean;
+    if (!needAnaStates) {
+      ana_mean += ana_pert.ens_mean();
+    }
     if (do_test_prints) {
       Log::test() << "Analysis mean :" << ana_mean << std::endl;
     }

@@ -56,6 +56,11 @@ class VerticalLocEV: private util::ObjectCounter<VerticalLocEV<MODEL>> {
 // modulate an increment
   void modulateIncrement(const Increment4D_ &, IncrementSet_ &) const;
 
+// modulate an increment with a single eigenmode \p ieig (overwrites incrOut).
+// Allows callers to process one modulated member at a time instead of
+// holding all neig modulated increments in memory at once.
+  void modulateIncrement(const Increment4D_ &, const size_t ieig, Increment4D_ &) const;
+
 // modulate an incrementEnsemble at a {gridPoint, timeSlice}
   Eigen::MatrixXd modulateIncrement(const IncrementSet_ &,
                                     const GeometryIterator_ &, size_t) const;
@@ -310,6 +315,30 @@ void VerticalLocEV<MODEL>::modulateIncrement(const Increment4D_ & incr,
           gp *= EvecRepl;
           incrsOut(itime, ieig).setLocal(gp, gpi);
         }
+      }
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+template<typename MODEL>
+void VerticalLocEV<MODEL>::modulateIncrement(const Increment4D_ & incr,
+                                             const size_t ieig,
+                                             Increment4D_ & incrOut) const {
+  // modulate an increment incr with eigenmode ieig only; same arithmetic as
+  // the all-eigenmode overload above, but the caller can process modulated
+  // members one at a time instead of storing all neig of them.
+  for (size_t itime=0; itime < incr.size(); ++itime) {
+    if (EVsStoredAs3D_) {  // if EVs stored as 3D use oops operation for schur_product
+      incrOut[itime] = (*sqrtVertLoc_)[ieig];
+      incrOut[itime].schur_product_with(incr[itime]);
+    } else {
+      std::vector<double> EvecRepl = replicateEigenVector(ieig);
+      const Geometry_ & geom = incr[itime].geometry();
+      for (GeometryIterator_ gpi = geom.begin(); gpi != geom.end(); ++gpi) {
+        oops::LocalIncrement gp = incr[itime].getLocal(gpi);
+        gp *= EvecRepl;
+        incrOut[itime].setLocal(gp, gpi);
       }
     }
   }
