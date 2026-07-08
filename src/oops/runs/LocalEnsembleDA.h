@@ -180,16 +180,37 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     // remove one full copy of the ensemble from the solver's peak memory.
     const bool releaseEnsemble = (incvars == statevars) || !needAnaStates;
 
-    // initialize empty analysis perturbations
-    // (constructed before the background perturbations: it queries the
+    // The analysis perturbations can overwrite the background perturbations in
+    // place, removing a second full ensemble copy from the solver's peak
+    // memory, when nothing downstream needs the background/analysis pair:
+    // no net-increment path (releaseEnsemble is true), no posterior-increment
+    // output, no prior-variance output, and a solver whose grid point update
+    // reads all local background data before writing (canUpdateInPlace).
+    const bool inPlaceUpdate = releaseEnsemble &&
+        !fullConfig.getBool("driver.save posterior ensemble increments", false) &&
+        !fullConfig.getBool("driver.save prior variance", false) &&
+        solver->canUpdateInPlace();
+
+    // initialize empty analysis perturbations, unless the update is done in
+    // place (constructed before the background perturbations: it queries the
     // ensemble times, which must happen before the member states are released)
-    IncrementSet_ ana_pert(*geometry, incvars, ens_xx.times(), ens_xx.commTime(),
-                           members);
+    std::unique_ptr<IncrementSet_> ana_store;
+    if (!inPlaceUpdate) {
+      ana_store = std::make_unique<IncrementSet_>(*geometry, incvars, ens_xx.times(),
+                                                  ens_xx.commTime(), members);
+    }
 
     // calculate background ensemble perturbations
     IncrementSet_ bkg_pert(ens_xx, bkg_mean, incvars, members, releaseEnsemble);
 
+    // analysis perturbations: either updated in place of the background
+    // perturbations, or a separate set
+    IncrementSet_ & ana_pert = inPlaceUpdate ? bkg_pert : *ana_store;
+
     // run the solver at each gridpoint
+    Log::info() << "Updating analysis perturbations "
+                << (inPlaceUpdate ? "in place of" : "separately from")
+                << " the background perturbations" << std::endl;
     Log::info() << "Beginning core local solver..." << std::endl;
     util::printRunStats("LocalEnsembleDA before solver", true);
 

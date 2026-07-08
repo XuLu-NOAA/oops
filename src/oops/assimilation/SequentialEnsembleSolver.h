@@ -67,6 +67,11 @@ class SequentialEnsembleSolver : public LocalEnsembleSolver<MODEL, OBS> {
   void measurementUpdate(const IncrementSet_ & bg,
                          IncrementSet_ & an) override;
 
+  /// The sequential update copies \p bg into \p an up front and later re-reads the
+  /// original background perturbations for RTPP inflation after the analysis has
+  /// been updated, so the analysis may not alias the background.
+  bool canUpdateInPlace() const override {return false;}
+
   // IGNORE THIS, hack for compiling purposes only
   void measurementUpdate(const Eigen::VectorXd &,
                          const ObsErrors_ &,
