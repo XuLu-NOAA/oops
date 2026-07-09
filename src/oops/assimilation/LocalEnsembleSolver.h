@@ -13,12 +13,15 @@
 #include <cfloat>
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "eckit/config/Configuration.h"
 #include "eckit/config/LocalConfiguration.h"
+#include "eckit/exception/Exceptions.h"
+#include "oops/assimilation/DFSCalculator.h"
 #include "oops/assimilation/SubensembleSplitter.h"
 #include "oops/base/Departures.h"
 #include "oops/base/DeparturesEnsemble.h"
@@ -115,6 +118,9 @@ class LocalEnsembleSolver {
   /// accessor to obs localizations
   const ObsLocalizations_ & obsloc() const {return *obsloc_;}
 
+  /// Enable Nerger et al. 2012 observation localization regulation
+  bool useNergerRegulation() const { return useNergerRegulation_; }
+
  protected:
   const Geometry_  & geometry_;   ///< Geometry associated with the updated states
   const ObsSpaces_ & obspaces_;   ///< ObsSpaces used in the update
@@ -125,7 +131,6 @@ class LocalEnsembleSolver {
   std::unique_ptr<ObsErrors_>  R_;         ///< observation errors, set in computeHofX method
   std::unique_ptr<Departures_> invVarR_;   ///< inverse observation error variance for assimilated
                                            ///< observations
-  std::vector<ObsDataInt_> qcflags_;  ///< quality control flags
   eckit::LocalConfiguration inflopt_;
   int unperturbedIdx_;  ///< For stochastic filters: ensemble member index where obs are
                         ///< (optionally) unperturbed
@@ -140,6 +145,9 @@ class LocalEnsembleSolver {
   bool doCrossValidation;  ///< cross validation trigger
   size_t nsubens_;  ///< no. of subensembles
   std::unique_ptr<oops::SubensembleSplitter> SubensembleSplitter_;  ///< pointer to splitter
+
+  std::unique_ptr<DFSCalculator<OBS>> dfsCalculator_;  /// DFS
+  bool useNergerRegulation_;  ///< toggle for Nerger observation localisation regulation
 
   void applyAssimilatedMask(Departures_ & dep) const { dep.mask(*invVarR_); }
   /// Return true if the config requests SVD for the inverse analysis error covariance
@@ -156,6 +164,10 @@ class LocalEnsembleSolver {
                        [](unsigned char c) { return !std::isalpha(c) || std::islower(c); }));
     return (method == "singular value decomposition" || method == "svd");
   }
+
+ private:
+  // compute local inverse R vector with optional Nerger regulation
+  Departures_ computeNergerLocalR(const Departures_ & locvector) const;
 };
 
 // -----------------------------------------------------------------------------
@@ -192,6 +204,9 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
   } else {
     unperturbedIdx_ = -1;  // no unperturbed member
   }
+  useNergerRegulation_ = config.getBool("local ensemble DA.use nerger regulation", false);
+  Log::info() << "Nerger et al. (2012) observation localization regulation: " <<
+                 (useNergerRegulation_ ? "ON" : "OFF (default)") << std::endl;
   Log::info() << "Multiplicative inflation will be applied with multCoeff=" <<
                  inflopt_.getDouble("mult", 1.0) << std::endl;
   const double rtpp = inflopt_.getDouble("rtpp", 0.0);
@@ -209,6 +224,22 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
   } else {
     Log::info() << "RTPS not applied: rtpsCoeff is <=0, rtpsCoeff="
                 << rtps << std::endl;
+  }
+
+  // Instantiate the DFS calculator
+  if (config.has("driver")) {
+    const eckit::LocalConfiguration driver(config, "driver");
+    if (driver.getBool("dfs", false)) {
+      const size_t commSize = geometry_.getComm().size();
+      if (commSize != 1) {
+        const std::string e =
+          "DFS estimator is not yet implemented for observations distributed over multiple MPI "
+          "tasks.  Run with one task or set 'driver.dfs' to false.";
+        oops::Log::error() << e << std::endl;
+        throw eckit::NotImplemented(e, Here());
+      }
+      dfsCalculator_ = std::make_unique<DFSCalculator<OBS>>(omb_.nobs());
+    }
   }
 
   ObsEnsemble_ obsens(obspaces_, nens);
@@ -241,6 +272,63 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
 // -----------------------------------------------------------------------------
 
 template <typename MODEL, typename OBS>
+typename LocalEnsembleSolver<MODEL, OBS>::Departures_
+LocalEnsembleSolver<MODEL, OBS>::computeNergerLocalR(
+  const Departures_ & locvector) const {
+  // Nerger et al. (2012) observation localization regulation applied to R matrix
+  // Currently only supports diagonal R
+
+  Log::trace() << "LocalEnsembleSolver<MODEL, OBS>::computeNergerLocalR starting" << std::endl;
+
+  if (!invVarR_) {
+    oops::Log::error() << "invVarR_ not initialized before computeNergerLocalR. \n"
+                       << "Fail because this implies that observation error is a \n"
+                       << "correlated matrix not diagonal" << std::endl;
+    throw std::logic_error("invVarR_ is null");
+  }
+  const Eigen::VectorXd invVarR_local = invVarR_->packEigen(locvector);
+  const Eigen::MatrixXd Yb_local = this->Yb_->packEigen(locvector).template cast<double>();
+
+  // VarP_i = (1/(nens-1)) * sum_m Yb[m]_i^2, or the diagonal of background covariance error
+  // per local observation
+  const Eigen::ArrayXd VarP_local = Yb_local.array().square().colwise().sum().transpose() /
+                                     static_cast<double>(Yb_local.rows() - 1);
+
+  // gammaNerger_i = VarP_i / VarR_i = VarP_i * invVarR_i, per local observation
+  const Eigen::ArrayXd gammaNerger_local = VarP_local * invVarR_local.array();
+
+  // betaNerger_i = 1 + gammaNerger_i * (1 - loc_i), per local observation
+  const Eigen::ArrayXd loc_local = locvector.packEigen(locvector).array();
+  const Eigen::ArrayXd betaNerger_arr = 1.0 + gammaNerger_local * (1.0 - loc_local);
+
+  // Build nergerBeta Departures_: 1 at non-local obs, betaNerger_i at local obs positions
+  Departures_ nergerBeta(obspaces_);
+  nergerBeta.ones();
+  const std::vector<std::vector<size_t>> localIndices =
+      nergerBeta.maskAndSerialIndices(locvector);
+  const std::vector<size_t> serialSizes = nergerBeta.serialSizes();
+  std::vector<double> betaVec;
+  betaVec.reserve(nergerBeta.serialSize());
+  for (size_t ii = 0; ii < nergerBeta.size(); ++ii) {
+    nergerBeta[ii].serialize(betaVec);
+  }
+  size_t iStart = 0;
+  size_t iObs = 0;
+  for (size_t ii = 0; ii < localIndices.size(); ++ii) {
+    for (const size_t idx : localIndices[ii]) {
+      betaVec[idx + iStart] = betaNerger_arr(iObs++);
+    }
+    iStart += serialSizes[ii];
+  }
+  ASSERT(iObs == static_cast<size_t>(betaNerger_arr.size()));
+  size_t deserIdx = 0;
+  for (size_t ii = 0; ii < nergerBeta.size(); ++ii) {
+    nergerBeta[ii].deserialize(betaVec, deserIdx);
+  }
+  return nergerBeta;
+}
+
+template <typename MODEL, typename OBS>
 void LocalEnsembleSolver<MODEL, OBS>::measurementUpdate
 (const IncrementSet_ & bkg_pert, IncrementSet_ & ana_pert) {
   for (GeometryIterator_ i = geometry_.begin(); i != geometry_.end(); ++i) {
@@ -250,9 +338,6 @@ void LocalEnsembleSolver<MODEL, OBS>::measurementUpdate
     this->obsloc().computeLocalization(i, locvector);
     this->applyAssimilatedMask(locvector);
     const Eigen::VectorXd local_omb_vec = this->omb_.packEigen(locvector);
-    const Eigen::VectorXd localization = locvector.packEigen(locvector);
-    R_->localize(locvector);
-
     if (local_omb_vec.size() == 0) {
       // no obs. so no need to update Wa_ and wa_
       // ana_pert[i] = bkg_pert[i]
@@ -260,16 +345,36 @@ void LocalEnsembleSolver<MODEL, OBS>::measurementUpdate
                                i,
                                ana_pert);
     } else {
-      this->measurementUpdate(local_omb_vec,
-                              *R_,
-                              locvector,
-                              bkg_pert,
-                              i,
-                              ana_pert);
+      if (useNergerRegulation_) {
+        const Departures_ localizationMask(locvector);
+        const Departures_ nergerBeta = this->computeNergerLocalR(locvector);
+        ASSERT(locvector.serialSize() == nergerBeta.serialSize());
+        locvector /= nergerBeta;
+        locvector.mask(localizationMask);
+    }
+    R_->localize(locvector);
+
+    this->measurementUpdate(local_omb_vec,
+                            *R_,
+                            locvector,
+                            bkg_pert,
+                            i,
+                            ana_pert);
     }
   }
+  // Calculate the DFS >>>
+  if (dfsCalculator_) {
+    dfsCalculator_->finalize();
+    Departures_ mask(this->obspaces_);
+    mask.ones();
+    this->applyAssimilatedMask(mask);
+    // DFS per observation block (save in the log file and print on the screen)
+    const auto stats = dfsCalculator_->computeBlockStats(omb_, mask, observersconf_);
+    dfsCalculator_->printBlockStats(stats);
+    // DFS per observation (save in nc file)
+    dfsCalculator_->savePerObservation(omb_, mask, this->obspaces_, "DFS");
+  }
 }
-
 // -----------------------------------------------------------------------------
 
 template <typename MODEL, typename OBS>

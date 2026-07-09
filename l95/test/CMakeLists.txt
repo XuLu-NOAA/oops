@@ -107,6 +107,7 @@ list( APPEND l95_test_input
   testinput/letkf_perturbed_unpert_member.yaml
   testinput/letkf_noobs.yaml
   testinput/letkf_qc.yaml
+  testinput/letkf_nerger_localization.yaml
   testinput/linearmodel.yaml
   testinput/linobsoperator.yaml
   testinput/localization.yaml
@@ -128,6 +129,8 @@ list( APPEND l95_test_input
   testinput/obsvector.yaml
   testinput/pseudomodel.yaml
   testinput/pseudomodel_state4d.yaml
+  testinput/sequential_enkf.yaml
+  testinput/sequential_enkf_noobs.yaml
   testinput/simplifiedl95_DRGMRESR.yaml
   testinput/simplifiedl95_DRIPCG.yaml
   testinput/simplifiedl95_DRPCG.yaml
@@ -231,6 +234,7 @@ list( APPEND l95_testoutput
   testoutput/letkf_perturbed_unpert4.test
   testoutput/letkf_noobs.test
   testoutput/letkf_qc.test
+  testoutput/letkf_nerger_localization.test
   testoutput/letkf_gsi.test
   testoutput/makeobs3d.test
   testoutput/makeobs4d.test
@@ -238,6 +242,8 @@ list( APPEND l95_testoutput
   testoutput/makeobsbias.test
   testoutput/makeobspert.test
   testoutput/truth.test
+  testoutput/sequential_enkf.test
+  testoutput/sequential_enkf_noobs.test
   testoutput/simplifiedl95_DRGMRESR.test
   testoutput/simplifiedl95_DRIPCG.test
   testoutput/simplifiedl95_DRPCG.test
@@ -862,7 +868,13 @@ ecbuild_add_test( TARGET oops_l95_letkf_qc
                   ARGS testinput/letkf_qc.yaml
                   TEST_DEPENDS oops_l95_makeobs3d oops_l95_genenspert )
 
-ecbuild_add_test( TARGET oops_l95_letkf_gsi
+ecbuild_add_test( TARGET oops_l95_letkf_nerger_localization
+                  COMMAND l95_letkf.x
+                  ARGS testinput/letkf_nerger_localization.yaml
+                  OMP 2
+                  TEST_DEPENDS test_l95_makeobs3d test_l95_genenspert )
+
+ecbuild_add_test( TARGET test_l95_letkf_gsi
                   COMMAND l95_letkf.x
                   ARGS testinput/letkf_gsi.yaml
                   TEST_DEPENDS oops_l95_makeobs3d oops_l95_genenspert )
@@ -936,6 +948,19 @@ ecbuild_add_test( TARGET oops_l95_getkf_offline_hofx_one_member
                   COMMAND l95_letkf.x
                   ARGS testinput/getkf_offline_hofx_one_member.yaml
                   TEST_DEPENDS oops_l95_hofx3d_for_getkf oops_l95_getkf )
+
+#####################################################################
+# Sequential EnKF tests
+#####################################################################
+ecbuild_add_test( TARGET test_l95_sequential_enkf
+                  COMMAND l95_letkf.x
+                  ARGS testinput/sequential_enkf.yaml
+                  TEST_DEPENDS test_l95_makeobs3d test_l95_genenspert )
+
+ecbuild_add_test( TARGET test_l95_sequential_enkf_noobs
+                  COMMAND l95_letkf.x
+                  ARGS testinput/sequential_enkf_noobs.yaml
+                  TEST_DEPENDS oops_l95_forecast oops_l95_genenspert )
 
 #####################################################################
 # tests with simplified L95

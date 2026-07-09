@@ -42,6 +42,7 @@ list(
   oops/assimilation/DRPLanczosMinimizer.h
   oops/assimilation/DualMinimizer.h
   oops/assimilation/DualVector.h
+  oops/assimilation/EAKFSolver.h
   oops/assimilation/ETKFLinearAlgebra.cc
   oops/assimilation/ETKFLinearAlgebra.h
   oops/assimilation/FGMRES.h
@@ -97,6 +98,7 @@ list(
   oops/assimilation/SaddlePointMinimizer.h
   oops/assimilation/SaddlePointPrecondMatrix.h
   oops/assimilation/SaddlePointVector.h
+  oops/assimilation/SequentialEnsembleSolver.h
   oops/assimilation/SpectralLMP.h
   oops/assimilation/SubensembleSplitter.cc
   oops/assimilation/SubensembleSplitter.h
@@ -162,7 +164,6 @@ list(
   oops/base/Observers.h
   oops/base/ObserversTLAD.h
   oops/base/ObserverTLAD.h
-  oops/base/ObserverUtils.h
   oops/base/ObsLocalizations.h
   oops/base/ObsOperatorBase.h
   oops/base/ObsOperatorPert.h
@@ -230,6 +231,7 @@ list(
   oops/coupled/ModelAuxCovarianceCoupled.h
   oops/coupled/ModelAuxIncrementCoupled.h
   oops/coupled/ModelCoupled.h
+  oops/coupled/ModelDataCoupled.h
   oops/coupled/StateCoupled.h
   oops/coupled/TraitCoupled.h
   oops/coupled/UtilsCoupled.cc
@@ -306,8 +308,12 @@ list(
   oops/interface/State.h
   oops/interface/VariableChange.h
 
+  oops/mpi/ColorInfo.cc
+  oops/mpi/ColorInfo.h
   oops/mpi/mpi.cc
   oops/mpi/mpi.h
+  oops/mpi/Scope.cc
+  oops/mpi/Scope.h
 
   oops/runs/AddIncrement.h
   oops/runs/RescaleEnsPerts.h
@@ -365,6 +371,7 @@ list(
   oops/util/DateTime.cc
   oops/util/DateTime.h
   oops/util/datetime.intfb.h
+  oops/util/defines.h
   oops/util/dot_product.h
   oops/util/duration_f.cc
   oops/util/duration_f.h
@@ -373,6 +380,7 @@ list(
   oops/util/Duration.h
   oops/util/duration.intfb.h
   oops/util/Expect.h
+  oops/util/Factory.h
   oops/util/FieldSetHelpers.cc
   oops/util/FieldSetHelpers.h
   oops/util/FieldSetOperations.cc
@@ -427,6 +435,17 @@ list(
   oops/util/random.intfb.h
   oops/util/RandomField.h
   oops/util/Range.h
+  oops/util/redistribution/CommGatherScatterRedistribution.cc
+  oops/util/redistribution/CommGatherScatterRedistribution.h
+  oops/util/redistribution/CommRedistribution.h
+  oops/util/redistribution/CommRedistributionCompatChecker.cc
+  oops/util/redistribution/CommRedistributionCompatChecker.h
+  oops/util/redistribution/CommRedistributionRepository.cc
+  oops/util/redistribution/CommRedistributionRepository.h
+  oops/util/redistribution/CommStraightRedistribution.cc
+  oops/util/redistribution/CommStraightRedistribution.h
+  oops/util/redistribution/detail/AllToAllRouting.cc
+  oops/util/redistribution/detail/AllToAllRouting.h
   oops/util/reduction.cc
   oops/util/reduction.h
   oops/util/ScalarOrMap.h
@@ -656,6 +675,7 @@ if(BUILD_TESTING)
     test/interface/State.h
     test/interface/VariableChange.h
 
+    test/mpi/ColorInfo.h
     test/mpi/mpi.h
 
     test/generic/fft_multiple.h
@@ -840,7 +860,7 @@ if(BUILD_TESTING)
                     LIBS    oops )
 
   ecbuild_add_test( TARGET  oops_util_parameters
-                    SOURCES test/base/Parameters.cc
+                    SOURCES test/util/Parameters.cc
                     ARGS    "test/testinput/parameters.yaml"
                     ENVIRONMENT VALIDATE_PARAMETERS=1
                     LIBS    oops )
@@ -915,6 +935,10 @@ if(BUILD_TESTING)
                     SOURCES test/generic/soar.cc
                     LIBS    oops eckit )
 
+  ecbuild_add_test( TARGET  oops_generic_diffusion
+                    SOURCES test/generic/diffusion.cc
+                    LIBS    oops eckit )
+
   ecbuild_add_test( TARGET  oops_coupled_splitvariables
                     SOURCES test/coupled/SplitVariables.cc
                     LIBS    oops eckit )
@@ -967,6 +991,12 @@ if(BUILD_TESTING)
 
   ecbuild_add_test( TARGET  oops_util_range
                     SOURCES test/util/Range.cc
+                    ARGS    "test/testinput/empty.yaml"
+                    LIBS    oops )
+
+  ecbuild_add_test( TARGET  oops_mpi_color_info
+                    MPI     6
+                    SOURCES test/mpi/ColorInfo.cc
                     ARGS    "test/testinput/empty.yaml"
                     LIBS    oops )
 
@@ -1055,6 +1085,18 @@ if(BUILD_TESTING)
   ecbuild_add_test( TARGET  oops_util_fieldset_subcommunicators
                     MPI     2
                     SOURCES test/util/FieldSetSubCommunicators.cc
+                    ARGS    "test/testinput/empty.yaml"
+                    LIBS    oops )
+
+  ecbuild_add_test( TARGET  oops_util_comm_redistribution
+                    MPI     6
+                    SOURCES test/util/CommRedistribution.cc
+                    ARGS    "test/testinput/empty.yaml"
+                    LIBS    oops )
+
+  ecbuild_add_test( TARGET  oops_util_comm_redistribution_repository
+                    MPI     2
+                    SOURCES test/util/CommRedistributionRepository.cc
                     ARGS    "test/testinput/empty.yaml"
                     LIBS    oops )
 

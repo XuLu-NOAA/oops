@@ -69,6 +69,8 @@ UnstructuredInterpolator::UnstructuredInterpolator(const eckit::Configuration & 
   ASSERT(lats_out.size() == lons_out.size());
   nout_ = lats_out.size();
 
+  regionalNnFillDistance_ = config.getDouble("regional nn fill distance in km", 0.0) * 1000.0;
+
   computeUnmaskedInterpMatrix(lats_out, lons_out);
 
   Log::trace() << "UnstructuredInterpolator::UnstructuredInterpolator done" << std::endl;
@@ -82,6 +84,7 @@ void UnstructuredInterpolator::apply(const Variables & vars, const atlas::FieldS
   Log::trace() << "UnstructuredInterpolator::apply starting" << std::endl;
   util::Timer timer("oops::UnstructuredInterpolator", "apply");
 
+  if (nout_ == 0) { return; }
   ASSERT(target_mask.size() == nout_);
 
   size_t nflds = 0;
@@ -148,6 +151,7 @@ void UnstructuredInterpolator::applyAD(const Variables & vars, atlas::FieldSet &
   Log::trace() << "UnstructuredInterpolator::applyAD starting" << std::endl;
   util::Timer timer("oops::UnstructuredInterpolator", "applyAD");
 
+  if (nout_ == 0) { return; }
   ASSERT(target_mask.size() == nout_);
 
   std::vector<double>::const_iterator current = vals.begin();
@@ -327,14 +331,40 @@ void UnstructuredInterpolator::computeUnmaskedInterpMatrix(
         std::vector<std::vector<size_t>>(nout_, std::vector<size_t>(nstencil_)),
         std::vector<std::vector<double>>(nout_, std::vector<double>(nstencil_, 0.0))}));
 
+  // TODO(FH):
+  // Enable some logic check so that regional NN fill is *only* activated on
+  // regional grids. This will require a robust way of identifying regional
+  // grids, probably by passing a bool from the model's Geometry interface.
+  // Today, this fill capability can be activated on global grids, where it
+  // could mask unintended grid configuration errors.
+  const bool enableRegionalNnFill = (regionalNnFillDistance_ > 0.0);
+
   for (size_t jloc = 0; jloc < nout_; ++jloc) {
     std::array<int, 3> indices{};
     std::array<double, 3> baryCoords{};
     const bool validTriangle = geom_.containingTriangleAndBarycentricCoords(
         lats_out[jloc], lons_out[jloc], indices, baryCoords);
 
-    // Edge case: target point outside of source grid, can occur for local-area models
+    // Edge case: target point outside of source grid, can occur for regional models
     if (!validTriangle) {
+      if (enableRegionalNnFill) {
+        const auto search_result = geom_.closestPointWithinRadius(lats_out[jloc], lons_out[jloc],
+                                                                  regionalNnFillDistance_);
+        if (search_result.has_value()) {
+          // NN extrapolation: full weight on the single nearest source point
+          const int index = search_result.value();
+          auto & interp_is = interp_matrices_.at(unmaskedName_).stencils[jloc];
+          auto & interp_ws = interp_matrices_.at(unmaskedName_).weights[jloc];
+          interp_is[0] = static_cast<size_t>(index);
+          interp_is[1] = static_cast<size_t>(index);
+          interp_is[2] = static_cast<size_t>(index);
+          interp_ws[0] = 1.0;
+          interp_ws[1] = 0.0;
+          interp_ws[2] = 0.0;
+          // targetHasValidStencil[jloc] remains true (as initialized)
+          continue;
+        }
+      }
       interp_matrices_[unmaskedName_].targetHasValidStencil[jloc] = false;
       continue;
     }

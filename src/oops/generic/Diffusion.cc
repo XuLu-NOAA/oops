@@ -5,10 +5,14 @@
  * which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
  */
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <utility>
+#include <vector>
 
+#include "atlas/mesh/actions/BuildCellCentres.h"
 #include "atlas/mesh/actions/BuildEdges.h"
+#include "atlas/mesh/actions/BuildXYZField.h"
 
 #include "oops/base/GeometryData.h"
 #include "oops/generic/Diffusion.h"
@@ -55,76 +59,81 @@ std::unique_ptr<Diffusion::DerivedGeom> calculateDerivedGeom_NodeColumns(
                     " are running with > 1 PE, until oops is updated to use atlas version"
                     " >= 0.37", __FILE__, __LINE__);
   }
-  ASSERT(mesh.nodes().has_field("xyz"));
-  ASSERT(mesh.cells().has_field("centre"));
-  ASSERT(mesh.edges().size() > 0);
+  atlas::mesh::actions::BuildXYZField()(mesh);
+  atlas::mesh::actions::BuildCellCentres()(mesh);
 
-  // process the geometry. (Noting that the atlas mesh nodes are the center of
-  // our model grid cell) For each pair of connecting nodes we need to calculate
-  // the length of the edge connecting two nodes (easy) and the length of the
-  // model grid box side that crosses this edge (not as easy).
-  // ----------------------------------------------------------------------------------------------
+  // An empty partition -- a rank that owns no mesh nodes, which can happen for
+  // observation-space diffusion on more than one PE -- has no mesh edges. Skip the
+  // edge-geometry build on such ranks, but still run the collective inv_area halo
+  // exchange below so every rank stays in lockstep.
+  if (mesh.edges().size() > 0) {
+    // process the geometry. (Noting that the atlas mesh nodes are the center of
+    // our model grid cell) For each pair of connecting nodes we need to calculate
+    // the length of the edge connecting two nodes (easy) and the length of the
+    // model grid box side that crosses this edge (not as easy).
+    // ----------------------------------------------------------------------------------------------
 
-  // get the fields we'll need later
-  const auto ghost = atlas::array::make_view<int, 1>(mesh.nodes().ghost());
-  const auto xyz = atlas::array::make_view<double, 2>(mesh.nodes().field("xyz"));
-  const auto centers = atlas::array::make_view<double, 2>(mesh.cells().field("centre"));
+    // get the fields we'll need later
+    const auto ghost = atlas::array::make_view<int, 1>(mesh.nodes().ghost());
+    const auto xyz = atlas::array::make_view<double, 2>(mesh.nodes().field("xyz"));
+    const auto centers = atlas::array::make_view<double, 2>(mesh.cells().field("centre"));
 
-  // get the edge/node/cell connectivity
-  const auto & edge2node = mesh.edges().node_connectivity();
-  const auto & edge2cell = mesh.edges().cell_connectivity();
+    // get the edge/node/cell connectivity
+    const auto & edge2node = mesh.edges().node_connectivity();
+    const auto & edge2cell = mesh.edges().cell_connectivity();
 
-  // calculate the grid parameters we'll need later for diffusion.
-  derivedGeom->edgeGeom.reserve(mesh.edges().size());
-  for (atlas::idx_t i = 0; i < mesh.edges().size(); i++) {
-    // get the node indexes
-    ASSERT(edge2node.cols(i) == 2);
-    const auto nodeA = edge2node(i, 0);
-    const auto nodeB = edge2node(i, 1);
-    ASSERT(nodeA != nodeB);
+    // calculate the grid parameters we'll need later for diffusion.
+    derivedGeom->edgeGeom.reserve(mesh.edges().size());
+    for (atlas::idx_t i = 0; i < mesh.edges().size(); i++) {
+      // get the node indexes
+      ASSERT(edge2node.cols(i) == 2);
+      const auto nodeA = edge2node(i, 0);
+      const auto nodeB = edge2node(i, 1);
+      ASSERT(nodeA != nodeB);
 
-    // If both nodes are in the halo, don't bother adding this edge to the vector
-    if (ghost(nodeA) && ghost(nodeB)) continue;
+      // If both nodes are in the halo, don't bother adding this edge to the vector
+      if (ghost(nodeA) && ghost(nodeB)) continue;
 
-    // create edge in vector. Make sure the lowest value index is first for
-    // reasons that I might care about later, maybe.
-    Diffusion::DerivedGeom::EdgeGeom &edgeGeom = derivedGeom->edgeGeom.emplace_back();
-    edgeGeom.nodeA = nodeA;
-    edgeGeom.nodeB = nodeB;
-    if (edgeGeom.nodeA > edgeGeom.nodeB) {
-      std::swap(edgeGeom.nodeA, edgeGeom.nodeB);
+      // create edge in vector. Make sure the lowest value index is first for
+      // reasons that I might care about later, maybe.
+      Diffusion::DerivedGeom::EdgeGeom &edgeGeom = derivedGeom->edgeGeom.emplace_back();
+      edgeGeom.nodeA = nodeA;
+      edgeGeom.nodeB = nodeB;
+      if (edgeGeom.nodeA > edgeGeom.nodeB) {
+        std::swap(edgeGeom.nodeA, edgeGeom.nodeB);
+      }
+
+      // calculate the length of the mesh edge (i.e. length between two model grid cell centers)
+      const auto & pointA = atlas::Point3(xyz(nodeA, 0), xyz(nodeA, 1), xyz(nodeA, 2));
+      const auto & pointB = atlas::Point3(xyz(nodeB, 0), xyz(nodeB, 1), xyz(nodeB, 2));
+      edgeGeom.edgeLength = atlas::Point3::distance(pointA, pointB);
+
+      // get atlas mesh cell centers, and estimate length of original model grid cell edge
+      // that passes through this atlas edge.
+      ASSERT(edge2cell.cols(i) == 2);
+      const atlas::idx_t cellA = edge2cell(i, 0);
+      const atlas::idx_t cellB = edge2cell(i, 1);
+
+      // NOTE atlas is returning a cell index of -1 if there is only 1 cell. Also,
+      // at one point with some compilers I was getting very large cell indexes
+      // for invalid cells, not sure if that is still a problem
+      if (cellA < 0 || cellB < 0 ||
+          cellA >= mesh.cells().size() || cellB >= mesh.cells().size()) {
+        // There is no second cell center, so just make up a reasonable value
+        edgeGeom.aspectRatio = 1.0;
+      } else {
+        const auto & centerA = atlas::Point3(centers(cellA, 0),
+                                             centers(cellA, 1),
+                                             centers(cellA, 2));
+        const auto & centerB = atlas::Point3(centers(cellB, 0),
+                                             centers(cellB, 1),
+                                             centers(cellB, 2));
+        const double center2centerLen = atlas::Point3::distance(centerA, centerB);
+        edgeGeom.aspectRatio = edgeGeom.edgeLength < MIN_LENGTH ? 0.0 :
+                               center2centerLen / edgeGeom.edgeLength;
+      }
     }
-
-    // calculate the length of the mesh edge (i.e. length between two model grid cell centers)
-    const auto & pointA = atlas::Point3(xyz(nodeA, 0), xyz(nodeA, 1), xyz(nodeA, 2));
-    const auto & pointB = atlas::Point3(xyz(nodeB, 0), xyz(nodeB, 1), xyz(nodeB, 2));
-    edgeGeom.edgeLength = atlas::Point3::distance(pointA, pointB);
-
-    // get atlas mesh cell centers, and estimate length of original model grid cell edge
-    // that passes through this atlas edge.
-    ASSERT(edge2cell.cols(i) == 2);
-    const atlas::idx_t cellA = edge2cell(i, 0);
-    const atlas::idx_t cellB = edge2cell(i, 1);
-
-    // NOTE atlas is returning a cell index of -1 if there is only 1 cell. Also,
-    // at one point with some compilers I was getting very large cell indexes
-    // for invalid cells, not sure if that is still a problem
-    if (cellA < 0 || cellB < 0 ||
-        cellA >= mesh.cells().size() || cellB >= mesh.cells().size()) {
-      // There is no second cell center, so just make up a reasonable value
-      edgeGeom.aspectRatio = 1.0;
-    } else {
-      const auto & centerA = atlas::Point3(centers(cellA, 0),
-                                           centers(cellA, 1),
-                                           centers(cellA, 2));
-      const auto & centerB = atlas::Point3(centers(cellB, 0),
-                                           centers(cellB, 1),
-                                           centers(cellB, 2));
-      const double center2centerLen = atlas::Point3::distance(centerA, centerB);
-      edgeGeom.aspectRatio = edgeGeom.edgeLength < MIN_LENGTH ? 0.0 :
-                             center2centerLen / edgeGeom.edgeLength;
-    }
-  }
+  }  // if (mesh.edges().size() > 0)
 
   // save other grid based constants that are used later. e.g. inv_area (1/area)
   derivedGeom->inv_area = fs.createField<double>();
@@ -136,35 +145,46 @@ std::unique_ptr<Diffusion::DerivedGeom> calculateDerivedGeom_NodeColumns(
       v_inv_area(i) = v_area(i, 0) < MIN_LENGTH ? 0.0 : 1.0 / v_area(i, 0);
     }
   } else {
-    // Ugh, the model interface did NOT give us any precomputed area field. Warn
-    // user that diffusion accuracy might be compromised.
+    // No precomputed area field, so estimate each node's control-volume area
+    // from the mesh using the median-dual (barycentric lumped) area: every cell
+    // contributes (cell area)/(n vertices) to each of its nodes. This scales with
+    // node degree and local cell size, and reduces to (edge length)^2 on a
+    // regular quad grid. Owned-node areas are summed from locally-incident cells,
+    // then the halo exchange below copies them onto ghost nodes.
     oops::Log::warning() << "WARNING - oops::Diffusion needs the geometry's area but none is"
-                            " given. Crudely estimating area. Please provide"
-                            " an 'area' field in your geometry." << std::endl;
+                            " given. Estimating it from the mesh (median-dual area)."
+                            " Please provide an 'area' field in your geometry." << std::endl;
 
-    // just get a rough estimate of the the area, it doesn't have to be exact.
-    // For each edge, add its length to the two nodes, take the square of the
-    // average of these distances for all the nodes
-    auto count = fs.createField<int>();
-    auto v_count = atlas::array::make_view<int, 1>(count);
-    v_count.assign(0);
-    v_inv_area.assign(0.0);
-    for (const auto & edge : derivedGeom->edgeGeom) {
-      v_count(edge.nodeA) += 1;
-      v_count(edge.nodeB) += 1;
-      v_inv_area(edge.nodeA) += edge.edgeLength;
-      v_inv_area(edge.nodeB) += edge.edgeLength;
+    auto area = fs.createField<double>();
+    auto v_area = atlas::array::make_view<double, 1>(area);
+    v_area.assign(0.0);
+    const auto xyz = atlas::array::make_view<double, 2>(mesh.nodes().field("xyz"));
+    const auto & cell2node = mesh.cells().node_connectivity();
+    for (atlas::idx_t c = 0; c < mesh.cells().size(); c++) {
+      const atlas::idx_t ncols = cell2node.cols(c);
+      if (ncols < 3) continue;
+      // total cell area by fan-triangulation from the cell's first node
+      const atlas::idx_t n0 = cell2node(c, 0);
+      double cellArea = 0.0;
+      for (atlas::idx_t t = 1; t + 1 < ncols; t++) {
+        const atlas::idx_t n1 = cell2node(c, t);
+        const atlas::idx_t n2 = cell2node(c, t + 1);
+        const double ux = xyz(n1, 0)-xyz(n0, 0), uy = xyz(n1, 1)-xyz(n0, 1);
+        const double uz = xyz(n1, 2)-xyz(n0, 2);
+        const double vx = xyz(n2, 0)-xyz(n0, 0), vy = xyz(n2, 1)-xyz(n0, 1);
+        const double vz = xyz(n2, 2)-xyz(n0, 2);
+        const double cx = uy*vz - uz*vy, cy = uz*vx - ux*vz, cz = ux*vy - uy*vx;
+        cellArea += 0.5 * std::sqrt(cx*cx + cy*cy + cz*cz);
+      }
+      // barycentric lumping: split the cell area equally among its vertices
+      const double share = cellArea / static_cast<double>(ncols);
+      for (atlas::idx_t v = 0; v < ncols; v++) v_area(cell2node(c, v)) += share;
     }
     for (atlas::idx_t i = 0; i < fs.size(); i++) {
-      if (v_count(i) == 0) continue;
-      double v = v_inv_area(i) / v_count(i);
-      v_inv_area(i) = 1.0 / (v * v);
+      v_inv_area(i) = v_area(i) < MIN_LENGTH ? 0.0 : 1.0 / v_area(i);
     }
     derivedGeom->inv_area.set_dirty();
     derivedGeom->inv_area.haloExchange();
-
-    // TODO(Travis) if we stop having models provide area, look into having a
-    // more accurate area estimate.
   }
 
   return derivedGeom;
@@ -303,6 +323,12 @@ std::shared_ptr<Diffusion::DerivedGeom> Diffusion::calculateDerivedGeom(
 
 // --------------------------------------------------------------------------------------
 
+const atlas::Field & Diffusion::inverseArea() const {
+  return derivedGeom_->inv_area;
+}
+
+// --------------------------------------------------------------------------------------
+
 Diffusion::Diffusion(const GeometryData & geometryData,
                      const std::shared_ptr<DerivedGeom> & derivedGeom)
   : geom_(geometryData), derivedGeom_(derivedGeom)
@@ -319,9 +345,13 @@ Diffusion::Diffusion(const GeometryData & geometryData,
 
 // --------------------------------------------------------------------------------------
 
-void Diffusion::setParameters(const atlas::FieldSet & parameters) {
+void Diffusion::setParameters(const atlas::FieldSet & parameters,
+                              VerticalMethod vtMethod,
+                              int vtImplicitIterations) {
   oops::Log::trace() << "Diffusion::setParameters start" << std::endl;
   util::Timer timer("oops::Diffusion", "setParameters");
+
+  vtMethod_ = vtMethod;
 
   const std::string HZ_SCALES = "hzScales";
   const std::string VT_SCALES = "vtScales";
@@ -342,6 +372,7 @@ void Diffusion::setParameters(const atlas::FieldSet & parameters) {
     // calculate the actual min number of hz iterations, and the diffusion coefficients (khdt_)
     double minItr = 0;
     const auto v_hzScales = atlas::array::make_view<double, 2>(parameters[HZ_SCALES]);
+    const auto v_inv_area = atlas::array::make_view<double, 1>(derivedGeom_->inv_area);
     khdtLevels_ = v_hzScales.shape(1);
     khdt_.resize(edgeGeom.size(), std::vector<double>(khdtLevels_));
 
@@ -358,14 +389,20 @@ void Diffusion::setParameters(const atlas::FieldSet & parameters) {
                             v_hzScales(edgeGeom[e].nodeB, level)) / 2.0;
           khdt_[e][level] = s * s;
 
-          // calculate the minimum number of iterations needed to be computationally stable
-          // on this PE
+          // Min iterations for explicit stability on this PE: the per-step
+          // diffusion number khdt * aspectRatio * inv_area must stay <= 1/4,
+          // which (with khdt = s^2/(2 niter)) gives niter >= 2 s^2 * aspectRatio
+          // * inv_area. Using the true aspectRatio*inv_area rather than assuming
+          // 1/edgeLength^2 keeps it stable on irregular meshes; on a uniform quad
+          // grid the two are equal, so this matches the previous bound.
           const double el = edgeGeom[e].edgeLength;
           if (el <= 0) {
             util::abor1_cpp("oops::Diffusion will not work with grids with degenerate points"
                             " that are not masked out", __FILE__, __LINE__);
           }
-          minItr = std::max(2.0 * (s*s) / (el*el), minItr);
+          const double invAreaMax = std::max(v_inv_area(edgeGeom[e].nodeA),
+                                             v_inv_area(edgeGeom[e].nodeB));
+          minItr = std::max(2.0 * (s*s) * edgeGeom[e].aspectRatio * invAreaMax, minItr);
         }
       }
     }
@@ -389,41 +426,87 @@ void Diffusion::setParameters(const atlas::FieldSet & parameters) {
   // Vertical diffusion parameters (in units of # of levels)
   //-------------------------------------------------------------------------------------
   if (parameters.has(VT_SCALES)) {
-    // calculate the min number of vertical iterations, and the diffusion coefficients
-    double minItr = 0;
     const auto v_vtScales = atlas::array::make_view<double, 2> (parameters[VT_SCALES]);
-    kvdt_ = fs.createField<double>(atlas::option::levels(v_vtScales.shape(1)-1));
-    auto v_kvdt = atlas::array::make_view<double, 2>(kvdt_);
-    for (atlas::idx_t i = 0; i < kvdt_.shape(0); i++) {
-      for (atlas::idx_t level = 0; level < kvdt_.shape(1); level++) {
-        if (v_vtScales(i, level) == 0.0 || v_vtScales(i, level+1) == 0.0) {
-          // one of the nodes is masked out, don't diffuse with it.
-          v_kvdt(i, level) = 0.0;
-        } else {
-          // calculate the diffusion coefficient (not taking into account the number of
-          // iterations.. yet)
-          double s = (v_vtScales(i, level) + v_vtScales(i, level+1)) / 2;
-          v_kvdt(i, level) = s * s;
+    const atlas::idx_t nz     = v_vtScales.shape(1);
+    const atlas::idx_t nIface = nz - 1;
 
-          // calculate the minimum number of iterations needed to be computationally stable
-          // on this PE
-          minItr = std::max(2.0 * s * s, minItr);
+    if (vtMethod_ == VerticalMethod::Explicit) {
+      // calculate the min number of vertical iterations, and the diffusion coefficients
+      double minItr = 0;
+      kvdt_ = fs.createField<double>(atlas::option::levels(nIface));
+      auto v_kvdt = atlas::array::make_view<double, 2>(kvdt_);
+      for (atlas::idx_t i = 0; i < kvdt_.shape(0); i++) {
+        for (atlas::idx_t level = 0; level < kvdt_.shape(1); level++) {
+          if (v_vtScales(i, level) == 0.0 || v_vtScales(i, level+1) == 0.0) {
+            // one of the nodes is masked out, don't diffuse with it.
+            v_kvdt(i, level) = 0.0;
+          } else {
+            // calculate the diffusion coefficient (not taking into account the number of
+            // iterations.. yet)
+            double s = (v_vtScales(i, level) + v_vtScales(i, level+1)) / 2;
+            v_kvdt(i, level) = s * s;
+
+            // calculate the minimum number of iterations needed to be computationally stable
+            // on this PE
+            minItr = std::max(2.0 * s * s, minItr);
+          }
         }
       }
-    }
-    niterVt_ = std::ceil(minItr/2) * 2;  // make sure number of iterations is even
-    // get the global min number of iterations
-    geom_.comm().allReduceInPlace(niterVt_, eckit::mpi::Operation::MAX);
+      niterVt_ = std::ceil(minItr/2) * 2;  // make sure number of iterations is even
+      // get the global min number of iterations
+      geom_.comm().allReduceInPlace(niterVt_, eckit::mpi::Operation::MAX);
 
-    // TODO(Travis) do some error checking to make sure niterVt_ is not too big
-    oops::Log::info() << "Diffusion: vertical iterations: " << niterVt_ << std::endl;
+      // TODO(Travis) do some error checking to make sure niterVt_ is not too big
+      oops::Log::info() << "Diffusion: vertical iterations (explicit): " << niterVt_ << std::endl;
 
-    // adjust the above calculated diffusion coefficients by the final number of
-    // iterations
-    for (atlas::idx_t i = 0; i < kvdt_.shape(0); i++) {
-      for (atlas::idx_t lvl = 0; lvl < kvdt_.shape(1); lvl++) {
-        v_kvdt(i, lvl) *= 1.0 / (2.0 * niterVt_);
+      // adjust the above calculated diffusion coefficients by the final number of
+      // iterations
+      for (atlas::idx_t i = 0; i < kvdt_.shape(0); i++) {
+        for (atlas::idx_t lvl = 0; lvl < kvdt_.shape(1); lvl++) {
+          v_kvdt(i, lvl) *= 1.0 / (2.0 * niterVt_);
+        }
       }
+    } else {
+      // Implicit scheme: build (I - alpha*Laplacian) per column with Neumann BCs
+      // and pre-factorize as LDL^T. See jedi-docs for the Matern-M derivation and
+      // the alpha = s^2 / (2M - 3) formula linking user's length to Daley length.
+      if (vtImplicitIterations < 2 || vtImplicitIterations % 2 != 0) {
+        util::abor1_cpp("Diffusion: implicit vertical iterations must be an even integer >= 2",
+                        __FILE__, __LINE__);
+      }
+      niterVt_ = vtImplicitIterations;
+      const double invC = 1.0 / (2.0 * niterVt_ - 3.0);
+
+      vtImplicitD_       = fs.createField<double>(atlas::option::levels(nz));
+      vtImplicitSubDiag_ = fs.createField<double>(atlas::option::levels(nIface));
+      auto v_D = atlas::array::make_view<double, 2>(vtImplicitD_);
+      auto v_L = atlas::array::make_view<double, 2>(vtImplicitSubDiag_);
+
+      std::vector<double> alpha(nIface);
+      for (atlas::idx_t i = 0; i < v_vtScales.shape(0); i++) {
+        for (atlas::idx_t k = 0; k < nIface; k++) {
+          if (v_vtScales(i, k) == 0.0 || v_vtScales(i, k+1) == 0.0) {
+            alpha[k] = 0.0;  // masked points decouple
+          } else {
+            const double s = (v_vtScales(i, k) + v_vtScales(i, k+1)) / 2.0;
+            alpha[k] = s * s * invC;
+          }
+        }
+
+        v_D(i, 0) = (nIface > 0) ? 1.0 + alpha[0] : 1.0;
+        for (atlas::idx_t k = 1; k < nz; k++) {
+          const double a = -alpha[k-1];
+          const double dk_raw = (k < nz - 1)
+                                ? 1.0 + alpha[k-1] + alpha[k]
+                                : 1.0 + alpha[k-1];
+          const double Lk = a / v_D(i, k-1);
+          v_L(i, k-1) = Lk;
+          v_D(i, k)   = dk_raw - Lk * a;
+        }
+      }
+
+      oops::Log::info() << "Diffusion: vertical iterations (implicit): "
+                        << niterVt_ << std::endl;
     }
   }
   oops::Log::trace() << "Diffusion::setScales end" << std::endl;
@@ -448,7 +531,10 @@ void Diffusion::multiply(atlas::FieldSet &fset, Mode mode) const {
     bool doHz = (mode == Mode::HorizontalOnly || mode == Mode::Split3D) && niterHz_ > 0;
 
     // apply half the vertical diffusion iterations
-    if (doVt) multiplyVtTL(field);
+    if (doVt) {
+      if (vtMethod_ == VerticalMethod::Explicit) multiplyVtExplicitTL(field);
+      else                                       multiplyVtImplicit(field);
+    }
 
     // then all the horizontal diffusion iterations
     if (doHz) {
@@ -457,7 +543,10 @@ void Diffusion::multiply(atlas::FieldSet &fset, Mode mode) const {
     }
 
     // then the other half of the vertical diffusion iterations
-    if (doVt) multiplyVtTL(field);
+    if (doVt) {
+      if (vtMethod_ == VerticalMethod::Explicit) multiplyVtExplicitTL(field);
+      else                                       multiplyVtImplicit(field);
+    }
   }
 
   oops::Log::trace() << "Diffusion::multiply end" << std::endl;
@@ -483,7 +572,10 @@ void Diffusion::multiplySqrtTL(atlas::FieldSet &fset, Mode mode) const {
     bool doHz = (mode == Mode::HorizontalOnly || mode == Mode::Split3D) && niterHz_ > 0;
 
     if (doHz) multiplyHzTL(field);
-    if (doVt) multiplyVtTL(field);
+    if (doVt) {
+      if (vtMethod_ == VerticalMethod::Explicit) multiplyVtExplicitTL(field);
+      else                                       multiplyVtImplicit(field);
+    }
   }
   oops::Log::trace() << "Diffusion::multiplySqrtTL end" << std::endl;
 }
@@ -507,7 +599,10 @@ void Diffusion::multiplySqrtAD(atlas::FieldSet &fset, Mode mode) const {
     bool doVt = (mode == Mode::VerticalOnly || mode == Mode::Split3D) && niterVt_ > 0;
     bool doHz = (mode == Mode::HorizontalOnly || mode == Mode::Split3D) && niterHz_ > 0;
 
-    if (doVt) multiplyVtAD(field);
+    if (doVt) {
+      if (vtMethod_ == VerticalMethod::Explicit) multiplyVtExplicitAD(field);
+      else                                       multiplyVtImplicit(field);
+    }
     if (doHz) multiplyHzAD(field);
   }
   oops::Log::trace() << "Diffusion::multiplySqrtAD end" << std::endl;
@@ -630,7 +725,7 @@ void Diffusion::multiplyHzAD(atlas::Field & field) const {
 
 // --------------------------------------------------------------------------------------
 
-void Diffusion::multiplyVtTL(atlas::Field & field) const {
+void Diffusion::multiplyVtExplicitTL(atlas::Field & field) const {
   if (field.shape(1) <= 1) return;  // early exit for 2D fields
 
   // make sure input field is correct shape
@@ -664,7 +759,7 @@ void Diffusion::multiplyVtTL(atlas::Field & field) const {
 // --------------------------------------------------------------------------------------
 // NOTE: the vertical adjoint code should produce identical answers compared
 // with the TL code above. It's explicitly coded anyway just to be safe
-void Diffusion::multiplyVtAD(atlas::Field & field) const {
+void Diffusion::multiplyVtExplicitAD(atlas::Field & field) const {
   if (field.shape(1) <= 1) return;  // early exit for 2D fields
 
   // make sure input field is correct shape
@@ -694,6 +789,44 @@ void Diffusion::multiplyVtAD(atlas::Field & field) const {
       }
     }
   }
+}
+
+// --------------------------------------------------------------------------------------
+// Apply M/2 solves of the pre-factored A = L D L^T to deliver the square root
+// of the implicit vertical diffusion. The discrete A is SPD by construction, so
+// each solve is exactly self-adjoint and this single routine serves as both
+// square-root TL and AD. See jedi-docs for the derivation.
+void Diffusion::multiplyVtImplicit(atlas::Field & field) const {
+  if (field.shape(1) <= 1) return;  // early exit for 2D fields
+  ASSERT(field.shape(0) == vtImplicitD_.shape(0));
+  ASSERT(field.shape(1) == vtImplicitD_.shape(1));
+  ASSERT(vtImplicitSubDiag_.shape(1) == field.shape(1) - 1);
+
+  field.haloExchange();
+  auto v_field = atlas::array::make_view<double, 2>(field);
+  const auto v_D = atlas::array::make_view<double, 2>(vtImplicitD_);
+  const auto v_L = atlas::array::make_view<double, 2>(vtImplicitSubDiag_);
+
+  const atlas::idx_t nz = field.shape(1);
+
+  for (int itr = 0; itr < niterVt_ / 2; itr++) {
+    for (atlas::idx_t i = 0; i < field.shape(0); i++) {
+      // forward substitution
+      for (atlas::idx_t k = 1; k < nz; k++) {
+        v_field(i, k) -= v_L(i, k-1) * v_field(i, k-1);
+      }
+      // diagonal
+      for (atlas::idx_t k = 0; k < nz; k++) {
+        v_field(i, k) /= v_D(i, k);
+      }
+      // backward substitution
+      for (atlas::idx_t k = nz - 2; k >= 0; k--) {
+        v_field(i, k) -= v_L(i, k) * v_field(i, k+1);
+      }
+    }
+  }
+
+  field.set_dirty(true);
 }
 
 // --------------------------------------------------------------------------------------
