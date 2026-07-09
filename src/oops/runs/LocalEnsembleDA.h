@@ -20,10 +20,10 @@
 #include "oops/assimilation/instantiateLocalEnsembleSolverFactory.h"
 #include "oops/assimilation/LocalEnsembleSolver.h"
 #include "oops/base/Departures.h"
-#include "oops/base/EnsembleObservers.h"
 #include "oops/base/Geometry.h"
 #include "oops/base/Increment.h"
-#include "oops/base/ModulatedEnsembleObservers.h"
+#include "oops/base/LinearEnsembleObservers.h"
+#include "oops/base/NonlinearEnsembleObservers.h"
 #include "oops/base/Observations.h"
 #include "oops/base/ObsSpaces.h"
 #include "oops/base/StateSet.h"
@@ -137,12 +137,18 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
 
     // compute H(x)
     const std::string solverType = fullConfig.getString("local ensemble DA.solver");
-    if (solverType.find("GETKF") != std::string::npos) {
-      ModulatedEnsembleObservers<MODEL, OBS> modEnsembleObservers(obsdb, *geometry, fullConfig, nens, bkg_mean, incvars);
-      modEnsembleObservers.computeHofX(ens_xx, bkg_mean, 0);
+    // GETKF-family solvers need H(x) for the modulated ensemble (vertical localization
+    // eigenvector) perturbations in addition to the plain ensemble perturbations.
+    const bool isModulated = solverType.find("GETKF") != std::string::npos;
+    const bool useLinearObserver = fullConfig.getBool("local ensemble DA.use linear observer",
+                                                       false);
+    if (useLinearObserver) {
+      LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
+          isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
+      ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
     } else {
-      // set up observers
-      EnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens);
+      NonlinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
+          isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
       ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
     }
 
@@ -309,9 +315,16 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     // hence one might not expect that oman and omaf are comparable
     if (fullConfig.getBool("driver.do posterior observer", true)) {
       // need to create a posterior solver that stores ana_mean internally.
-      // This is needed if linear observer is used, because it is linearized arround this mean
-      EnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens);
-      ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
+      // This is needed if linear observer is used, because it is linearized arround this mean.
+      // The posterior observer is never modulated, even for GETKF-family solvers.
+      if (useLinearObserver) {
+        LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens);
+        ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
+      } else {
+        NonlinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig,
+                                                                  nens);
+        ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
+      }
     }
 
     // Save the obsspace only if an hofx was calculated
