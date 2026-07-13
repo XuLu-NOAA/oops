@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <memory>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -122,13 +123,15 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
   ObsErrors_ Rmat(this->observersconf_, this->obspaces_);
 
   // modulation infrastructure (only used when this->modulated_ is true)
-  const size_t nEV = this->modulated_ ? this->neig_ : 0;
   Increment4D_ dx(this->geometry_, this->modulated_ ? this->incvars_ : ens_xx.variables(),
                  ens_xx.times());
-  std::vector<int> evMembers(nEV);
-  std::iota(evMembers.begin(), evMembers.end(), 0);
-  IncrementSet_ Ztmp(this->geometry_, this->modulated_ ? this->incvars_ : ens_xx.variables(),
-                     ens_xx.times(), xxmean.commTime(), evMembers);
+  std::unique_ptr<IncrementSet_> Ztmp;
+  if (this->modulated_) {
+    std::vector<int> evMembers(this->neig_);
+    std::iota(evMembers.begin(), evMembers.end(), 0);
+    Ztmp = std::make_unique<IncrementSet_>(this->geometry_, this->incvars_, ens_xx.times(),
+                                            xxmean.commTime(), evMembers);
+  }
   Observations_ tmpObs(this->obspaces_);
 
   for (size_t jj = 0; jj < this->nens_; ++jj) {
@@ -159,11 +162,11 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
       for (size_t it = 0; it < times.size(); ++it) {
         dx(it, 0).diff(ens_xx(it, jj), xxmean[it]);
       }
-      this->vertloc_->modulateIncrement(dx, Ztmp);
+      this->vertloc_->modulateIncrement(dx, *Ztmp);
       for (size_t ieig = 0; ieig < this->neig_; ++ieig) {
         StateSet_ tmpState = xxmean;
         for (size_t it = 0; it < times.size(); ++it) {
-          tmpState[it] += Ztmp(it, ieig);
+          tmpState[it] += (*Ztmp)(it, ieig);
         }
 
         this->computeHofX4D(config, tmpState, tmpObs, flength, default_tstep, obsaux, moderr,
