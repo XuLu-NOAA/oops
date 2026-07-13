@@ -255,7 +255,7 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
   obsloc_ = std::make_unique<ObsLocalizations_>(observersconf_, obspaces_);
   for (size_t iens = 0; iens < Yb_->size(); ++iens) {
     tmpDeps = obsens[iens] - ybmean_;
-    //updateAssimilatedMask(tmpDeps);
+    // updateAssimilatedMask(tmpDeps);
     Yb_->setData(iens, tmpDeps);
   }
   Observations_ yobs(obspaces_, "ObsValue");
