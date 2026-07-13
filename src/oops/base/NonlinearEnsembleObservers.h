@@ -183,6 +183,10 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
 
   // calculate H(x) ensemble mean
   Observations_ yb_mean(obsens.mean());
+  // treat the special case of nens=1: default option: xxmean=mean(xb) then yb_mean == y_mean_xb
+  // and the below is a tautology; if use control member==true, xxmean was read from the control
+  // member, then using H(xxmean) (y_mean_xb) is expected by downstream applications
+  if (this->nens_ == 1) {yb_mean = y_mean_xb;}
   const std::string type = iteration == 0 ? "background" : "analysis";
   const std::string group = iteration == 0 ? "ombg" : "oman";
   Log::test() << "H(x) ensemble " << type << " mean: " << std::endl << yb_mean << std::endl;
