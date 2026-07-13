@@ -485,10 +485,10 @@ void Increment<MODEL>::deserialize(const std::vector<double> & vect, size_t & cu
 
 template<typename MODEL>
 void Increment<MODEL>::print(std::ostream & os) const {
-//  Log::trace() << "Increment<MODEL>::print starting" << std::endl;
-//  util::Timer timer(classname(), "print");
-//  os << *increment_;
-//  Log::trace() << "Increment<MODEL>::print done" << std::endl;
+  Log::trace() << "Increment<MODEL>::print starting" << std::endl;
+  util::Timer timer(classname(), "print");
+  os << *increment_;
+  Log::trace() << "Increment<MODEL>::print done" << std::endl;
 }
 
 // -----------------------------------------------------------------------------
