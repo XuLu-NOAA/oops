@@ -502,21 +502,38 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
       patchRadius = fmax(patchRadius, dist);
     }
 
-    // update observations configs with information on patch center and radius
+    // update observations configs with information on patch center and radius.
+    // Only set center/radius on whichever of "distribution"/"redistribution" the obs space's
+    // own config already declares: "distribution" is the original (pre-redistribution-feature)
+    // Halo-type distribution, kept for models/tests that have not opted into the new
+    // observer/solver redistribution machinery (which additionally requires the dataframe
+    // ioda backend); "redistribution" is the new, opt-in mechanism used to re-decompose obs
+    // (e.g. between a separate observer job and this solver job) across patches. Obs spaces
+    // that use neither (e.g. RoundRobin) are left untouched.
     std::vector<eckit::LocalConfiguration> obsConfigs = obsConfig.getSubConfigurations();
 
     if (obsConfigs.size() > 0) {
       for (auto & conf : obsConfigs) {
-        conf.set("obs space.redistribution.center", patchCenter);
-        conf.set("obs space.redistribution.radius", patchRadius);
+        setPatchGeometry(conf, patchCenter, patchRadius);
       }
 
       eckit::LocalConfiguration tmp;
       tmp.set("observers", obsConfigs);
       obsConfig = tmp.getSubConfiguration("observers");
     } else {
-      obsConfig.set("obs space.redistribution.center", patchCenter);
-      obsConfig.set("obs space.redistribution.radius", patchRadius);
+      setPatchGeometry(obsConfig, patchCenter, patchRadius);
+    }
+  }
+
+  void setPatchGeometry(eckit::LocalConfiguration & conf, const std::vector<double> & patchCenter,
+                        const double patchRadius) const {
+    if (conf.has("obs space.distribution")) {
+      conf.set("obs space.distribution.center", patchCenter);
+      conf.set("obs space.distribution.radius", patchRadius);
+    }
+    if (conf.has("obs space.redistribution")) {
+      conf.set("obs space.redistribution.center", patchCenter);
+      conf.set("obs space.redistribution.radius", patchRadius);
     }
   }
 
