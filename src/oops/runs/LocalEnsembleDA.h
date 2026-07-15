@@ -29,6 +29,7 @@
 #include "oops/base/StateSet.h"
 #include "oops/base/StateSetSaver.h"
 #include "oops/interface/GeometryIterator.h"
+#include "oops/interface/ObsDataVector.h"
 #include "oops/mpi/mpi.h"
 #include "oops/runs/Application.h"
 #include "oops/runs/Forecast.h"
@@ -50,6 +51,7 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
   typedef Increment<MODEL>                 Increment_;
   typedef IncrementSet<MODEL>              IncrementSet_;
   typedef LocalEnsembleSolver<MODEL, OBS>  LocalSolver_;
+  typedef ObsDataVector<OBS, int>          ObsDataInt_;
   typedef ObsSpaces<OBS>                   ObsSpaces_;
   typedef Observations<OBS>                Observations_;
   typedef Model<MODEL>                     Model_;
@@ -142,14 +144,27 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     const bool isModulated = solverType.find("GETKF") != std::string::npos;
     const bool useLinearObserver = fullConfig.getBool("local ensemble DA.use linear observer",
                                                        false);
-    if (useLinearObserver) {
-      LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
-          isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
-      ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
-    } else {
-      NonlinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
-          isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
-      ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
+    // QC flags established here (background, iteration 0) are carried over to the posterior
+    // observer (iteration 1) below, so that an observation excluded from the background
+    // diagnostics/assimilation stays excluded from the posterior ones too, rather than each
+    // ensemble observer independently (and potentially inconsistently) re-deriving its own QC
+    // decisions from a clean slate. They are saved to disk (rather than simply kept in memory)
+    // and immediately released because obsdb.redistribute() below refuses to run while any
+    // ObsDataVector remains attached to the obs space.
+    {
+      std::vector<ObsDataInt_> priorQcFlags;
+      if (useLinearObserver) {
+        LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
+            isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
+        ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
+        priorQcFlags = ensembleObservers.qcFlags();
+      } else {
+        NonlinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig,
+            nens, isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
+        ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
+        priorQcFlags = ensembleObservers.qcFlags();
+      }
+      for (auto & flags : priorQcFlags) flags.save("PriorQcFlags");
     }
 
     // quit early if running in observer-only mode
@@ -314,15 +329,25 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     // than LETKF background/analysis perturbations.
     // hence one might not expect that oman and omaf are comparable
     if (fullConfig.getBool("driver.do posterior observer", true)) {
+      // read back the background QC flags saved above (see comment there for why they were
+      // saved to disk rather than simply kept around in memory)
+      std::vector<ObsDataInt_> priorQcFlags;
+      for (size_t jj = 0; jj < obsdb.size(); ++jj) {
+        ObsDataInt_ flags(obsdb[jj], obsdb[jj].obsvariables());
+        flags.read("PriorQcFlags");
+        priorQcFlags.push_back(flags);
+      }
       // need to create a posterior solver that stores ana_mean internally.
       // This is needed if linear observer is used, because it is linearized arround this mean.
       // The posterior observer is never modulated, even for GETKF-family solvers.
       if (useLinearObserver) {
-        LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens);
+        LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
+            nullptr, nullptr, &priorQcFlags);
         ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
       } else {
         NonlinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig,
-                                                                  nens);
+                                                                  nens, nullptr, nullptr,
+                                                                  &priorQcFlags);
         ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
       }
     }

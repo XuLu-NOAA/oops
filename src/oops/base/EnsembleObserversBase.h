@@ -75,10 +75,21 @@ class EnsembleObserversBase {
   /// initialize observers with \p obspaces, \p geometry, full \p config and \p nens ensemble
   /// size. If \p xbmean and \p incvars are provided (non-null), the modulated-ensemble (GETKF)
   /// infrastructure (vertical localization eigenvectors) is set up as well.
+  /// If \p priorQcFlags is provided (non-null), observations excluded there (e.g. by an earlier
+  /// background ensemble observer) are also excluded from the final ensemble-mean departures
+  /// computed by this object (e.g. a later posterior/analysis ensemble observer) - see
+  /// \ref maskWithPriorQcFlags. Each ensemble observer otherwise independently (re-)computes its
+  /// own QC decisions from scratch, which without this would let an observation excluded from
+  /// e.g. the background diagnostics reappear in the posterior ones (or vice versa).
   EnsembleObserversBase(ObsSpaces_ & obspaces, const Geometry_ & geometry,
                         const eckit::Configuration & config, size_t nens,
-                        const StateSet_ * xbmean = nullptr, const Variables * incvars = nullptr);
+                        const StateSet_ * xbmean = nullptr, const Variables * incvars = nullptr,
+                        const std::vector<ObsDataInt_> * priorQcFlags = nullptr);
   virtual ~EnsembleObserversBase() = default;
+
+  /// quality control flags resulting from this object's computeHofX, one per obs space - meant
+  /// to be passed as \p priorQcFlags to a later ensemble observer (see constructor)
+  const std::vector<ObsDataInt_> & qcFlags() const {return qcflags_;}
 
  protected:
   const Geometry_  & geometry_;   ///< Geometry associated with the updated states
@@ -90,7 +101,11 @@ class EnsembleObserversBase {
   std::unique_ptr<ObsErrors_>  R_;         ///< observation errors, set in computeHofX method
   std::unique_ptr<Departures_> invVarR_;   ///< inverse observation error variance for assimilated
                                            ///< observations; set in initializeAssimilatedMask
-  std::vector<ObsDataInt_> qcflags_;  ///< quality control flags
+  std::vector<ObsDataInt_> qcflags_;  ///< quality control flags, set by computeHofX
+
+  /// QC flags inherited from another ensemble observer's computeHofX (e.g. background, when this
+  /// is the posterior observer) - see constructor and \ref maskWithPriorQcFlags. Empty if none.
+  std::vector<ObsDataInt_> priorQcFlags_;
 
   /// whether the modulated ensemble (GETKF) infrastructure below is active
   const bool modulated_;
@@ -112,6 +127,20 @@ class EnsembleObserversBase {
   /// Apply the assimilated mask to a departures vector \p dep - missing values
   /// in the mask will become missing in the departures.
   void applyAssimilatedMask(Departures_ & dep) const { dep.mask(*invVarR_); }
+  /// Mask \p dep (the final ensemble-mean departures) with this object's own QC flags (from
+  /// its H(mean(Xb)) computation, \ref qcflags_) and, if this object was constructed with prior
+  /// QC flags (see constructor), also with those - so an observation excluded either here or by
+  /// an earlier (e.g. background) ensemble observer is consistently excluded from both.
+  void maskWithPriorQcFlags(Departures_ & dep) const {
+    dep.mask(qcflags_);
+    if (!priorQcFlags_.empty()) dep.mask(priorQcFlags_);
+  }
+  /// Overload for the ensemble-mean H(x) itself (\ref Observations_), printed alongside \p dep
+  /// above - kept consistent with it for the same reason.
+  void maskWithPriorQcFlags(Observations_ & yy) const {
+    yy.mask(qcflags_);
+    if (!priorQcFlags_.empty()) yy.mask(priorQcFlags_);
+  }
 
   /// Apply the non-linear observation operator to the state \p xx and store the result in \p yy.
   /// If \p enrollTrajectory is provided, it is called with the internal nonlinear-model
@@ -134,7 +163,9 @@ EnsembleObserversBase<MODEL, OBS>::EnsembleObserversBase(ObsSpaces_ & obspaces,
                                                           const eckit::Configuration & config,
                                                           size_t nens,
                                                           const StateSet_ * xbmean,
-                                                          const Variables * incvars)
+                                                          const Variables * incvars,
+                                                          const std::vector<ObsDataInt_> *
+                                                              priorQcFlags)
   : geometry_(geometry),
     obspaces_(obspaces),
     obsconf_(config, "observations"),
@@ -145,6 +176,10 @@ EnsembleObserversBase<MODEL, OBS>::EnsembleObserversBase(ObsSpaces_ & obspaces,
   for (size_t jj = 0; jj < obspaces_.size(); ++jj) {
     ObsDataInt_ qcflags(obspaces_[jj], obspaces_[jj].obsvariables());
     qcflags_.push_back(qcflags);
+  }
+  if (priorQcFlags != nullptr) {
+    ASSERT(priorQcFlags->size() == obspaces_.size());
+    priorQcFlags_ = *priorQcFlags;
   }
   if (modulated_) {
     ASSERT(incvars != nullptr);

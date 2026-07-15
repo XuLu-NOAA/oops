@@ -187,11 +187,13 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
   // and the below is a tautology; if use control member==true, xxmean was read from the control
   // member, then using H(xxmean) (y_mean_xb) is expected by downstream applications
   if (this->nens_ == 1) {yb_mean = y_mean_xb;}
+  this->maskWithPriorQcFlags(yb_mean);
   const std::string type = iteration == 0 ? "background" : "analysis";
   const std::string group = iteration == 0 ? "ombg" : "oman";
   Log::test() << "H(x) ensemble " << type << " mean: " << std::endl << yb_mean << std::endl;
   Observations_ yobs(this->obspaces_, "ObsValue");
   Departures_ diff(yobs - yb_mean);
+  this->maskWithPriorQcFlags(diff);
 
   diff.save(group);
   Log::test() << type << " y - H(x): " << std::endl << diff << std::endl;
