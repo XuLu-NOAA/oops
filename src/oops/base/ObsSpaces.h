@@ -149,6 +149,7 @@ template<typename OBS>
 void ObsSpaces<OBS>::redistribute(const eckit::Configuration & config) {
   Log::trace() << "ObsSpaces::redistribute start" << std::endl;
   std::vector<eckit::LocalConfiguration> subconfigs = config.getSubConfigurations();
+  ASSERT(subconfigs.size() == spaces_.size());
   for (size_t jj = 0; jj < subconfigs.size(); ++jj) {
     const eckit::LocalConfiguration obsconf(subconfigs[jj].getSubConfiguration("obs space"));
     if (obsconf.has("redistribution")) {

@@ -338,7 +338,7 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
         priorQcFlags.push_back(flags);
       }
       // need to create a posterior solver that stores ana_mean internally.
-      // This is needed if linear observer is used, because it is linearized arround this mean.
+      // This is needed if linear observer is used, because it is linearized around this mean.
       // The posterior observer is never modulated, even for GETKF-family solvers.
       if (useLinearObserver) {
         LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
