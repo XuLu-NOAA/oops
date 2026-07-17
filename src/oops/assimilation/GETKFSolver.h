@@ -172,6 +172,7 @@ DeterministicGETKF<MODEL, OBS>::DeterministicGETKF(ObsSpaces_ & obspaces,
 
   // read modulated ensemble
   Observations_ ytmp(this->ybmean_);
+  Departures_ tmpDeps(this->obspaces_);
   size_t ii = 0;
   for (size_t iens = 0; iens < nens_; ++iens) {
     Log::info() << " DeterministicGETKF::computeHofX starting ensemble member "
@@ -180,7 +181,10 @@ DeterministicGETKF<MODEL, OBS>::DeterministicGETKF(ObsSpaces_ & obspaces,
     for (size_t ieig = 0; ieig < neig_; ++ieig) {
       ytmp.read("hofxm0_"+std::to_string(ieig+1)+
                     "_"+std::to_string(iens+1));
-      HZb_->setData(ii, ytmp - this->ybmean_);
+      tmpDeps = ytmp - this->ybmean_;
+      // Also exclude any observations with missing modulated H(x) values
+      this->invVarR_->mask(tmpDeps);
+      HZb_->setData(ii, tmpDeps);
       ii = ii + 1;
     }
   }

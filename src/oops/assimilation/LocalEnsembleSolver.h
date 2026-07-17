@@ -255,7 +255,6 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
   obsloc_ = std::make_unique<ObsLocalizations_>(observersconf_, obspaces_);
   for (size_t iens = 0; iens < Yb_->size(); ++iens) {
     tmpDeps = obsens[iens] - ybmean_;
-    // updateAssimilatedMask(tmpDeps);
     Yb_->setData(iens, tmpDeps);
   }
   Observations_ yobs(obspaces_, "ObsValue");
@@ -266,6 +265,12 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
     (*R_)[jj].update(obserr[jj]);
   }
   invVarR_ = std::make_unique<Departures_>(R_->inverseVariance());
+  // Also exclude any observations with missing departures/H(x) values
+  invVarR_->mask(omb_);
+  for (size_t iens = 0; iens < Yb_->size(); ++iens) {
+    tmpDeps = Yb_->getData(iens);
+    invVarR_->mask(tmpDeps);
+  }
   oops::Log::trace() << "LocalEnsembleSolver created" << std::endl;
 }
 
