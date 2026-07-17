@@ -144,6 +144,13 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     const bool isModulated = solverType.find("GETKF") != std::string::npos;
     const bool useLinearObserver = fullConfig.getBool("local ensemble DA.use linear observer",
                                                        false);
+    // If true, H(x)/QC/obs-error for iteration 0 were already computed by an earlier job (e.g.
+    // the observer half of a split-mode observer/solver pair) and are already present in the obs
+    // space (via obsdatain); skip recomputing them here. LocalEnsembleSolver (and, for GETKF,
+    // the modulated-ensemble read in GETKFSolver) already reads the needed hofx0_*/
+    // EffectiveError0/hofxm0_* fields from the obs space regardless of how they got there, so no
+    // further change is needed there.
+    const bool readHXFromDisk = fullConfig.getBool("driver.read HX from disk", false);
     // QC flags established here (background, iteration 0) are carried over to the posterior
     // observer (iteration 1) below, so that an observation excluded from the background
     // diagnostics/assimilation stays excluded from the posterior ones too, rather than each
@@ -153,7 +160,15 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     // ObsDataVector remains attached to the obs space.
     {
       std::vector<ObsDataInt_> priorQcFlags;
-      if (useLinearObserver) {
+      if (readHXFromDisk) {
+        // Already-persisted QC from the iteration-0 observer (unaffected by this PR) stands in
+        // for the freshly-computed QC flags used below.
+        for (size_t jj = 0; jj < obsdb.size(); ++jj) {
+          ObsDataInt_ flags(obsdb[jj], obsdb[jj].obsvariables());
+          flags.read("EffectiveQC0");
+          priorQcFlags.push_back(flags);
+        }
+      } else if (useLinearObserver) {
         LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
             isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
         ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
