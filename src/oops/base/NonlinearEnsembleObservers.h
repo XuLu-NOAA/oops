@@ -102,7 +102,6 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
 
   // QC flags and Obs errors are set to that of the H(mean(Xb))
   this->R_->save("ObsError");
-  this->initializeAssimilatedMask();
 
   // save hofx means that hofx will be written out into ObsSpace;
   // if run computeHofX4D several times with save hofx on,
@@ -171,10 +170,6 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
 
         this->computeHofX4D(config, tmpState, tmpObs, flength, default_tstep, obsaux, moderr,
                             Rmat, qcflags);
-        // mask H(x) ensemble perturbations - i.e. make sure that obs that have
-        // failed QC on one ensemble member fail for all
-        Departures_ tmpDep = tmpObs - y_mean_xb;
-        this->updateAssimilatedMask(tmpDep);
         tmpObs.save("hofxm"+std::to_string(iteration)+"_"+std::to_string(ieig+1)+
                     "_"+std::to_string(jj+1));
       }

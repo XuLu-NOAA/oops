@@ -174,7 +174,6 @@ void LinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
 
   // QC flags and Obs errors are set to that of the H(mean(Xb))
   this->R_->save("ObsError");
-  this->initializeAssimilatedMask();
 
   // add linearized H(x) to the linear model postprocessor
   linear_hofx_->initializeTL(posttrajtl);
@@ -183,12 +182,6 @@ void LinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
   Observations_ yb_mean(y_mean_xb);
 
   if (this->modulated_) {
-    // calculate obs departures and mask out any missing departures as well as those that have
-    // failed QC
-    Observations_ yobs(this->obspaces_, "ObsValue");
-    Departures_ omb = yobs - y_mean_xb;
-    this->updateAssimilatedMask(omb);
-
     Increment4D_ dx(this->geometry_, this->incvars_, times);
     std::vector<int> evMembers(this->neig_);
     std::iota(evMembers.begin(), evMembers.end(), 0);
