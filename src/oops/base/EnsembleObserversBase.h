@@ -99,6 +99,8 @@ class EnsembleObserversBase {
   const size_t nens_;              ///< ensemble size
 
   std::unique_ptr<ObsErrors_>  R_;         ///< observation errors, set in computeHofX method
+  std::unique_ptr<Departures_> invVarR_;   ///< inverse observation error variance for assimilated
+                                           ///< observations; set in initializeAssimilatedMask
   std::vector<ObsDataInt_> qcflags_;  ///< quality control flags, set by computeHofX
 
   /// QC flags inherited from another ensemble observer's computeHofX (e.g. background, when this
@@ -111,6 +113,20 @@ class EnsembleObserversBase {
   size_t neig_;                                ///< number of vertical localization eigenvectors
   std::unique_ptr<VerticalLocEV_> vertloc_;     ///< vertical localization eigenvectors
 
+  /// Create a mask that excludes observations which will not be assimilated (e.g. failed QC) using
+  /// a single ensemble member.
+  void initializeAssimilatedMask() {
+    // Inverse variances have missing values where obs have failed QC, though R_
+    // is only valid for a single ensemble member
+    invVarR_ = std::make_unique<Departures_>(R_->inverseVariance());
+  }
+  /// Update departures for assimilated observations by masking with \p mask
+  /// (e.g. nonzero QC flags or missing obs) - should only be done in the
+  /// computeHofX method.
+  void updateAssimilatedMask(const Departures_ & mask) { invVarR_->mask(mask); }
+  /// Apply the assimilated mask to a departures vector \p dep - missing values
+  /// in the mask will become missing in the departures.
+  void applyAssimilatedMask(Departures_ & dep) const { dep.mask(*invVarR_); }
   /// Mask \p dep (the final ensemble-mean departures) with this object's own QC flags (from
   /// its H(mean(Xb)) computation, \ref qcflags_) and, if this object was constructed with prior
   /// QC flags (see constructor), also with those - so an observation excluded either here or by
