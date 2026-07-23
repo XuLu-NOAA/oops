@@ -11,6 +11,7 @@
 #include <Eigen/Dense>
 #include <cfloat>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <utility>
 #include <vector>
@@ -217,10 +218,9 @@ Observations<OBS> DeterministicGETKF<MODEL, OBS>::computeHofX(const StateSet_ & 
     ObsAuxInc_  obsauxinc(this->obspaces_, this->observersconf_);
 
     Increment4D_ dx(geometry_, this->incvars_, times);
-    // Modulated perturbation for a single eigenmode; eigenmodes are processed
-    // one at a time so that the full neig-sized set of modulated model-space
-    // increments is never held in memory at once.
-    Increment4D_ ztmp(geometry_, this->incvars_, times);
+    std::vector<int> evMembers(neig_);
+    std::iota(evMembers.begin(), evMembers.end(), 0);
+    IncrementSet_ Ztmp(geometry_, this->incvars_, times, this->xbmean_.commTime(), evMembers);
 
     size_t ii = 0;
     if (this->useLinearObserver()) {
@@ -265,6 +265,8 @@ Observations<OBS> DeterministicGETKF<MODEL, OBS>::computeHofX(const StateSet_ & 
         Log::info() << " DeterministicGETKF::computeHofX starting ensemble member "
                     << iens+1 << std::endl;
         util::printRunStats("DeterministicGETKF calculate hofx");
+        Log::info() << " GETKFSolver::computeHofX starting ensemble member " << iens+1 << std::endl;
+        util::printRunStats("GETKFSolver calculate hofx");
         tmpDeps.zero();
         // Setup PseudoLinearModelIncrement4D to run on ensemble perturbation
         for (size_t it = 0; it < times.size(); ++it) {
@@ -280,10 +282,14 @@ Observations<OBS> DeterministicGETKF<MODEL, OBS>::computeHofX(const StateSet_ & 
         Log::test() << "H(x) for member " << iens+1 << ":" << std::endl << tmpObs << std::endl;
         tmpObs.save("hofx"+std::to_string(iteration)+"_"+std::to_string(iens+1));
 
-        // observe modulated members, one eigenmode at a time
+        // observe modulated members
+        vertloc_.modulateIncrement(dx, Ztmp);
         for (size_t ieig = 0; ieig < neig_; ++ieig) {
-          vertloc_.modulateIncrement(dx, ieig, ztmp);
-          this->applyLinearToPerturbations(ztmp, flength, default_tstep, obsauxinc, moderrinc,
+          Increment4D_ z_eig(geometry_, this->incvars_, times);
+          for (size_t it = 0; it < times.size(); ++it) {
+            z_eig[it] = Ztmp(it, ieig);
+          }
+          this->applyLinearToPerturbations(z_eig, flength, default_tstep, obsauxinc, moderrinc,
                                            posttl, posttrajtl, tmpDeps);
           this->updateAssimilatedMask(tmpDeps);
           HZb_->setData(ii, tmpDeps);
@@ -326,12 +332,11 @@ Observations<OBS> DeterministicGETKF<MODEL, OBS>::computeHofX(const StateSet_ & 
         for (size_t it = 0; it < times.size(); ++it) {
           dx(it, 0).diff(ens_xx(it, iens), this->xbmean_[it]);
         }
-        // compute H(x) for modulated members, one eigenmode at a time
+        vertloc_.modulateIncrement(dx, Ztmp);
         for (size_t ieig = 0; ieig < neig_; ++ieig) {
-          vertloc_.modulateIncrement(dx, ieig, ztmp);
           StateSet_ tmpState = this->xbmean_;
           for (size_t it = 0; it < times.size(); ++it) {
-            tmpState[it] += ztmp[it];
+            tmpState[it] += Ztmp(it, ieig);
           }
           Observations_ tmpObs(this->obspaces_);
           this->computeHofX4D(config, tmpState, tmpObs, flength, default_tstep, obsaux, moderr,
@@ -354,10 +359,12 @@ Observations<OBS> DeterministicGETKF<MODEL, OBS>::computeHofX(const StateSet_ & 
   this->applyAssimilatedMask(this->omb_);
   this->applyAssimilatedMask(yb_mean);
   for (size_t iens = 0; iens < nanal_; ++iens) {
+    tmpDeps.zero();
     tmpDeps = (this->HZb_)->getData(iens);
     this->applyAssimilatedMask(tmpDeps);
     (this->HZb_)->setData(iens, tmpDeps);
     if (iens < nens_) {
+      tmpDeps.zero();
       tmpDeps = (this->Yb_)->getData(iens);
       this->applyAssimilatedMask(tmpDeps);
       (this->Yb_)->setData(iens, tmpDeps);
