@@ -111,6 +111,13 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     } else {
       incvars += statevars;
     }
+    ASSERT_MSG(incvars <= statevars,
+               "increment variables must be a subset of the state variables");
+    // "companion" variables: state variables that are not analyzed (not part of incvars) and
+    // simply pass through the analysis untouched (e.g. physics fields when only wind is
+    // analyzed).
+    Variables companionvars(statevars);
+    companionvars -= incvars;
     StateSet_ bkg_mean = ens_xx.ens_mean();
     // if control member is present use that instead of the ensemble mean
     if (fullConfig.getBool("driver.use control member", false)) {
@@ -171,14 +178,28 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     const bool needAnaStates =
         fullConfig.getBool("driver.save posterior ensemble", true) ||
         fullConfig.getBool("driver.do posterior observer", true);
+    // A strict, non-trivial subset release is possible when incvars is a proper subset of
+    // statevars (there are companion variables not touched by the analysis) and the model's
+    // State supports in-place variable-set resizing (State::updateFields). In that case each
+    // member state can be shrunk down to just the companion variables (instead of fully
+    // released) as soon as its incvars perturbation has been computed: the companion fields
+    // keep their original per-member values, so the full analysis state can later be
+    // reconstructed exactly (unlike a full release, which can only be reconstructed correctly
+    // when incvars spans the whole state).
+    const bool subsetRelease = needAnaStates && companionvars.size() > 0 &&
+        State_::supportsFieldSubsetting;
+
     // The prior member states are not needed during the (memory intensive)
     // solver update if the analysis members can be re-created afterwards from
     // the mean and the analysis perturbations (increment variables spanning
-    // the full state), or if the analysis member states are not needed at all
-    // (e.g. only analysis increments are written out). In these cases release
-    // each member state as soon as its perturbation has been computed, to
-    // remove one full copy of the ensemble from the solver's peak memory.
-    const bool releaseEnsemble = (incvars == statevars) || !needAnaStates;
+    // the full state), if the analysis member states are not needed at all
+    // (e.g. only analysis increments are written out), or if the companion
+    // (non-increment) variables can be retained in place while only the
+    // increment variables are released (subsetRelease). In these cases release
+    // each member state (fully, or down to just the companion variables) as
+    // soon as its perturbation has been computed, to remove one full (or
+    // partial) copy of the ensemble from the solver's peak memory.
+    const bool releaseEnsemble = (incvars == statevars) || !needAnaStates || subsetRelease;
 
     // The analysis perturbations can overwrite the background perturbations in
     // place, removing a second full ensemble copy from the solver's peak
@@ -201,7 +222,14 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     }
 
     // calculate background ensemble perturbations
-    IncrementSet_ bkg_pert(ens_xx, bkg_mean, incvars, members, releaseEnsemble);
+    IncrementSet_ bkg_pert = [&] {
+      if (subsetRelease) {
+        // shrink each member down to companionvars instead of fully releasing it
+        return IncrementSet_(ens_xx, bkg_mean, incvars, members, companionvars);
+      } else {
+        return IncrementSet_(ens_xx, bkg_mean, incvars, members, releaseEnsemble);
+      }
+    }();
 
     // analysis perturbations: either updated in place of the background
     // perturbations, or a separate set
@@ -223,7 +251,20 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     Log::info() << "Local solver completed." << std::endl;
     util::printRunStats("LocalEnsembleDA after solver", true);
     // calculate final analysis states (only when they are needed downstream)
-    if (releaseEnsemble && needAnaStates) {
+    if (subsetRelease) {
+      // The companion variables were retained per member (shrunk, not released): grow each
+      // member back to the full variable set. The companion fields keep their original
+      // per-member values (moved, not copied); the incvars fields come back freshly
+      // zero-initialized (see fv3jedi update_fields / State::updateFields).
+      ens_xx.updateFields(statevars);
+      // Form the absolute analysis values (background mean + analysis perturbation) for the
+      // incvars fields only, in a copy so ana_pert itself is left untouched (it is still
+      // needed below, as a perturbation, for the increments/variance output).
+      IncrementSet_ bkg_mean_incvars(*geometry, incvars, bkg_mean);
+      IncrementSet_ ana_absolute(ana_pert);
+      ana_absolute += bkg_mean_incvars;
+      ens_xx += ana_absolute;
+    } else if (releaseEnsemble && needAnaStates) {
       // Re-create each ensemble member state from the background mean and
       // apply all analysis perturbations across the ensemble/time set
       ens_xx.resetMembers(bkg_mean);

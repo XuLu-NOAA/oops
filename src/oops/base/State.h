@@ -65,6 +65,11 @@ class State : public interface::State<MODEL> {
   /// Write
   void write(const eckit::Configuration &) const;
 
+  /// See interface::State::supportsFieldSubsetting
+  static const bool supportsFieldSubsetting = interface::State<MODEL>::supportsFieldSubsetting;
+  /// See interface::State::updateFields
+  void updateFields(const Variables & vars) {interface::State<MODEL>::updateFields(vars);}
+
  private:
   const Geometry_ & resol_;
 };

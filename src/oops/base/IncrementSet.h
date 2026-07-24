@@ -53,6 +53,8 @@ class IncrementSet : public DataSetBase< Increment<MODEL>, Geometry<MODEL> > {
                const std::vector<int> &);
   IncrementSet(States_ &, const States_ &, const Variables &,
                const std::vector<int> &, const bool clearStates);
+  IncrementSet(States_ &, const States_ &, const Variables &,
+               const std::vector<int> &, const Variables & retainVars);
   IncrementSet(const std::vector<util::DateTime> &, const eckit::mpi::Comm &,
                const std::vector<int> &, const eckit::mpi::Comm &,
                const std::vector<std::shared_ptr<Increment_>> &);
@@ -254,6 +256,30 @@ IncrementSet<MODEL>::IncrementSet(States_ &ens, const States_ &mean,
       for (size_t itime = 0; itime < this->time_size(); ++itime) {
         (*this)(itime, iens).diff(ens(itime, iens), mean[itime]);
         if (clearStates) ens.clear(itime, iens);
+      }
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+/// Same as the perturbation constructor above with \p clearStates, but instead of fully
+/// releasing each ensemble member state once its perturbation has been computed, shrinks it
+/// in place down to just \p retainVars (typically the "companion" variables not touched by
+/// the analysis: statevars minus \p vars). This keeps those fields' per-member values
+/// available (untouched, at their original background values) for a later full-state
+/// reconstruction via StateSet::updateFields, while \p vars is dropped from \p ens since it
+/// is already captured in the returned perturbation set. Requires the model's State to
+/// support in-place variable-set resizing (State::updateFields / supportsFieldSubsetting).
+template<typename MODEL>
+IncrementSet<MODEL>::IncrementSet(States_ &ens, const States_ &mean,
+                                  const Variables &vars, const std::vector<int> &members,
+                                  const Variables &retainVars)
+    : IncrementSet(ens.geometry(), vars, ens.times(),
+             ens.commTime(), members) {
+    for (size_t iens = 0; iens < this->ens_size(); ++iens) {
+      for (size_t itime = 0; itime < this->time_size(); ++itime) {
+        (*this)(itime, iens).diff(ens(itime, iens), mean[itime]);
+        ens(itime, iens).updateFields(retainVars);
       }
     }
 }

@@ -60,6 +60,11 @@ class StateSet : public DataSetBase< State<MODEL>, Geometry<MODEL> > {
   /// member states have been released (e.g. by the perturbation constructor of
   /// IncrementSet with clearStates set).
   void resetMembers(const StateSet & pattern);
+  /// Resize every member's variable set to \p vars in place (see State::updateFields):
+  /// fields present in both the old and new variable sets keep their data, fields dropped
+  /// from the new set are deallocated, and fields newly added are zero-initialized. Only
+  /// available if State_::supportsFieldSubsetting is true.
+  void updateFields(const Variables & vars);
   // Collect distributed states and return a local subset
   StateSet transpose(const eckit::mpi::Comm & global,
            const Geometry_ & DAgeometry, const int ensNum) const;
@@ -188,6 +193,17 @@ void StateSet<MODEL>::resetMembers(const StateSet & pattern) {
   }
   this->check_consistency();
   Log::trace() << "StateSet::resetMembers done" << std::endl;
+}
+
+// -----------------------------------------------------------------------------
+
+template<typename MODEL>
+void StateSet<MODEL>::updateFields(const Variables & vars) {
+  Log::trace() << "StateSet<MODEL>::updateFields starting" << std::endl;
+  for (size_t jj = 0; jj < this->size(); ++jj) {
+    (*this)[jj].updateFields(vars);
+  }
+  Log::trace() << "StateSet<MODEL>::updateFields done" << std::endl;
 }
 
 // -----------------------------------------------------------------------------
