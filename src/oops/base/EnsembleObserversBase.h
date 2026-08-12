@@ -129,14 +129,29 @@ class EnsembleObserversBase {
   /// QC flags (see constructor), also with those - so an observation excluded either here or by
   /// an earlier (e.g. background) ensemble observer is consistently excluded from both.
   void maskWithPriorQcFlags(Departures_ & dep) const {
-    dep.mask(qcflags_);
-    if (!priorQcFlags_.empty()) dep.mask(priorQcFlags_);
+    dep.mask(restrictToAssimVariables(qcflags_));
+    if (!priorQcFlags_.empty()) dep.mask(restrictToAssimVariables(priorQcFlags_));
   }
   /// Overload for the ensemble-mean H(x) itself (\ref Observations_), printed alongside \p dep
   /// above - kept consistent with it for the same reason.
   void maskWithPriorQcFlags(Observations_ & yy) const {
-    yy.mask(qcflags_);
-    if (!priorQcFlags_.empty()) yy.mask(priorQcFlags_);
+    yy.mask(restrictToAssimVariables(qcflags_));
+    if (!priorQcFlags_.empty()) yy.mask(restrictToAssimVariables(priorQcFlags_));
+  }
+  /// \p flags is sized over each obs space's observed variables, while Departures_/Observations_
+  /// are always sized over its (possibly smaller) assimilated variables - narrow to the latter
+  /// so ObsVector::mask's variable-count check passes.
+  std::vector<ObsDataInt_> restrictToAssimVariables(const std::vector<ObsDataInt_> & flags) const {
+    std::vector<ObsDataInt_> result;
+    for (size_t jj = 0; jj < obspaces_.size(); ++jj) {
+      const ObsVariables & assimvars = obspaces_[jj].assimvariables();
+      ObsDataInt_ assimFlags(obspaces_[jj], assimvars);
+      for (const std::string & varname : assimvars.variables()) {
+        assimFlags.obsdatavector()[varname] = flags[jj].obsdatavector()[varname];
+      }
+      result.push_back(assimFlags);
+    }
+    return result;
   }
 
   /// Apply the non-linear observation operator to the state \p xx and store the result in \p yy.
