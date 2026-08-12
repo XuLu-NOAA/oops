@@ -138,18 +138,15 @@ class EnsembleObserversBase {
     yy.mask(restrictToAssimVariables(qcflags_));
     if (!priorQcFlags_.empty()) yy.mask(restrictToAssimVariables(priorQcFlags_));
   }
-  /// \p flags is sized over each obs space's observed variables, while Departures_/Observations_
-  /// are always sized over its (possibly smaller) assimilated variables - narrow to the latter
-  /// so ObsVector::mask's variable-count check passes.
+  /// Narrow \p flags (sized over observed variables) to the assimilated-variable subset that
+  /// Departures_/Observations_ use, via save/read since not every OBS backend supports indexing
+  /// \p flags directly by variable.
   std::vector<ObsDataInt_> restrictToAssimVariables(const std::vector<ObsDataInt_> & flags) const {
+    static const std::string scratchName = "EnsembleObserversBaseAssimVarsScratch";
     std::vector<ObsDataInt_> result;
     for (size_t jj = 0; jj < obspaces_.size(); ++jj) {
-      const ObsVariables & assimvars = obspaces_[jj].assimvariables();
-      ObsDataInt_ assimFlags(obspaces_[jj], assimvars);
-      for (const std::string & varname : assimvars.variables()) {
-        assimFlags.obsdatavector()[varname] = flags[jj].obsdatavector()[varname];
-      }
-      result.push_back(assimFlags);
+      flags[jj].save(scratchName);
+      result.emplace_back(obspaces_[jj], obspaces_[jj].assimvariables(), scratchName);
     }
     return result;
   }
