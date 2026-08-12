@@ -35,8 +35,18 @@
 #include "oops/util/abor1_cpp.h"
 #include "oops/util/Duration.h"
 #include "oops/util/Logger.h"
+#include "oops/util/TypeTraits.h"
 
 namespace oops {
+
+/// \brief Checks whether an obs backend's ObsSpace has assimvariables() (the possibly-narrower
+/// subset of obsvariables() that is actually simulated/assimilated).
+template<class, class = void>
+struct HasAssimVariables : std::false_type {};
+template<class ObsSpaceImpl>
+struct HasAssimVariables<ObsSpaceImpl,
+       cpp17::void_t<decltype(std::declval<ObsSpaceImpl>().assimvariables())>>
+  : std::true_type {};
 
 /// \brief Common infrastructure shared by the ensemble observers used by the local ensemble DA
 /// applications (LETKF/GETKF): running the nonlinear observation operator on a StateSet_ (the
@@ -138,6 +148,16 @@ class EnsembleObserversBase {
     yy.mask(restrictToAssimVariables(qcflags_));
     if (!priorQcFlags_.empty()) yy.mask(restrictToAssimVariables(priorQcFlags_));
   }
+  /// \p space's assimvariables() where supported (see HasAssimVariables), else its obsvariables()
+  /// (treating all observed variables as assimilated, for backends that don't distinguish them).
+  ///@{
+  template<class ObsSpaceImpl = typename OBS::ObsSpace>
+  static typename std::enable_if<HasAssimVariables<ObsSpaceImpl>::value, const ObsVariables &>::type
+  assimVariables(const ObsSpace<OBS> & space) { return space.obsspace().assimvariables(); }
+  template<class ObsSpaceImpl = typename OBS::ObsSpace>
+  static typename std::enable_if<!HasAssimVariables<ObsSpaceImpl>::value, const ObsVariables &>::type
+  assimVariables(const ObsSpace<OBS> & space) { return space.obsspace().obsvariables(); }
+  ///@}
   /// Narrow \p flags (sized over observed variables) to the assimilated-variable subset that
   /// Departures_/Observations_ use, via save/read since not every OBS backend supports indexing
   /// \p flags directly by variable.
@@ -146,7 +166,7 @@ class EnsembleObserversBase {
     std::vector<ObsDataInt_> result;
     for (size_t jj = 0; jj < obspaces_.size(); ++jj) {
       flags[jj].save(scratchName);
-      result.emplace_back(obspaces_[jj], obspaces_[jj].assimvariables(), scratchName);
+      result.emplace_back(obspaces_[jj], assimVariables(obspaces_[jj]), scratchName);
     }
     return result;
   }
