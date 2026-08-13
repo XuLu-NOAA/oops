@@ -155,7 +155,8 @@ class EnsembleObserversBase {
   static typename std::enable_if<HasAssimVariables<ObsSpaceImpl>::value, const ObsVariables &>::type
   assimVariables(const ObsSpace<OBS> & space) { return space.obsspace().assimvariables(); }
   template<class ObsSpaceImpl = typename OBS::ObsSpace>
-  static typename std::enable_if<!HasAssimVariables<ObsSpaceImpl>::value, const ObsVariables &>::type
+  static typename std::enable_if<!HasAssimVariables<ObsSpaceImpl>::value,
+                                  const ObsVariables &>::type
   assimVariables(const ObsSpace<OBS> & space) { return space.obsspace().obsvariables(); }
   ///@}
   /// Narrow \p flags (sized over observed variables) to the assimilated-variable subset that
