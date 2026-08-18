@@ -134,6 +134,17 @@ class EnsembleObserversBase {
   /// (e.g. nonzero QC flags or missing obs) - should only be done in the
   /// computeHofX method.
   void updateAssimilatedMask(const Departures_ & mask) { invVarR_->mask(mask); }
+  /// Apply the assimilated mask (accumulated via \ref updateAssimilatedMask across all ensemble
+  /// members, so an observation missing/failed QC on any one member is excluded everywhere) to a
+  /// departures vector \p dep - missing values in the mask become missing in \p dep.
+  void applyAssimilatedMask(Departures_ & dep) const { dep.mask(*invVarR_); }
+  /// Apply the assimilated mask (see above) to an observations vector \p obs - missing values in
+  /// the mask become missing in \p obs.
+  void applyAssimilatedMask(Observations_ & obs) const {
+    for (size_t jobs = 0; jobs < obs.size(); ++jobs) {
+      obs[jobs].mask((*invVarR_)[jobs]);
+    }
+  }
   /// Mask \p dep (the final ensemble-mean departures) with this object's own QC flags (from
   /// its H(mean(Xb)) computation, \ref qcflags_) and, if this object was constructed with prior
   /// QC flags (see constructor), also with those - so an observation excluded either here or by

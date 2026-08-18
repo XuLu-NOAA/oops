@@ -187,13 +187,28 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
   // and the below is a tautology; if use control member==true, xxmean was read from the control
   // member, then using H(xxmean) (y_mean_xb) is expected by downstream applications
   if (this->nens_ == 1) {yb_mean = y_mean_xb;}
+
+  Observations_ yobs(this->obspaces_, "ObsValue");
+  Departures_ diff(yobs - yb_mean);
+
+  // Make sure that obs missing/failed QC on any individual ensemble member are excluded from the
+  // saved diagnostics too (mirrors develop's applyAssimilatedMask, moved here since ensemble
+  // member H(x) is now computed by the observer rather than the solver).
+  Departures_ tmpDep(this->obspaces_);
+  for (size_t jj = 0; jj < this->nens_; ++jj) {
+    tmpDep = obsens[jj] - yb_mean;
+    this->updateAssimilatedMask(tmpDep);
+  }
+  this->updateAssimilatedMask(diff);
+  this->applyAssimilatedMask(yb_mean);
+  this->applyAssimilatedMask(diff);
+
   this->maskWithPriorQcFlags(yb_mean);
+  this->maskWithPriorQcFlags(diff);
+
   const std::string type = iteration == 0 ? "background" : "analysis";
   const std::string group = iteration == 0 ? "ombg" : "oman";
   Log::test() << "H(x) ensemble " << type << " mean: " << std::endl << yb_mean << std::endl;
-  Observations_ yobs(this->obspaces_, "ObsValue");
-  Departures_ diff(yobs - yb_mean);
-  this->maskWithPriorQcFlags(diff);
 
   diff.save(group);
   Log::test() << type << " y - H(x): " << std::endl << diff << std::endl;

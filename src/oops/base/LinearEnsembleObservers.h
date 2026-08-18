@@ -207,6 +207,8 @@ void LinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
       // observer.
       applyLinearToPerturbations(dx, flength, default_tstep, obsauxinc, moderrinc, posttl,
                                  posttrajtl, tmpDeps);
+      // make sure that obs which failed/are missing for this member fail for the whole ensemble
+      this->updateAssimilatedMask(tmpDeps);
       Observations_ tmpObs(y_mean_xb);
       tmpObs += tmpDeps;
       Log::test() << "H(x) for member " << jj+1 << ":" << std::endl << tmpObs << std::endl;
@@ -240,6 +242,8 @@ void LinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
       // member's background perturbation from the ensemble mean.
       applyLinearToPerturbations(dx, flength, default_tstep, obsauxinc, moderrinc, posttl,
                                  posttrajtl, tmpDeps);
+      // make sure that obs which failed/are missing for this member fail for the whole ensemble
+      this->updateAssimilatedMask(tmpDeps);
       // Secondly, add this to the ensemble mean in observation space (calculated with the
       // nonlinear obs operator) giving the approximate H(x_i)
       obsens[jj] = y_mean_xb;
@@ -255,13 +259,21 @@ void LinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
     if (this->nens_ == 1) {yb_mean = y_mean_xb;}
   }
 
+  Observations_ yobs(this->obspaces_, "ObsValue");
+  Departures_ diff(yobs - yb_mean);
+  // finish accumulating the assimilated mask with the ensemble-mean departure's own missingness,
+  // then apply it (mirrors develop's applyAssimilatedMask - see NonlinearEnsembleObservers for
+  // more detail)
+  this->updateAssimilatedMask(diff);
+  this->applyAssimilatedMask(yb_mean);
+  this->applyAssimilatedMask(diff);
+
   this->maskWithPriorQcFlags(yb_mean);
+  this->maskWithPriorQcFlags(diff);
+
   const std::string type = iteration == 0 ? "background" : "analysis";
   const std::string group = iteration == 0 ? "ombg" : "oman";
   Log::test() << "H(x) ensemble " << type << " mean: " << std::endl << yb_mean << std::endl;
-  Observations_ yobs(this->obspaces_, "ObsValue");
-  Departures_ diff(yobs - yb_mean);
-  this->maskWithPriorQcFlags(diff);
 
   diff.save(group);
   Log::test() << type << " y - H(x): " << std::endl << diff << std::endl;
