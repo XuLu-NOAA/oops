@@ -161,15 +161,13 @@ class EnsembleObserversBase {
   }
   /// \p space's assimvariables() where supported (see HasAssimVariables), else its obsvariables()
   /// (treating all observed variables as assimilated, for backends that don't distinguish them).
-  ///@{
-  template<class ObsSpaceImpl = typename OBS::ObsSpace>
-  static typename std::enable_if<HasAssimVariables<ObsSpaceImpl>::value, const ObsVariables &>::type
-  assimVariables(const ObsSpace<OBS> & space) { return space.obsspace().assimvariables(); }
-  template<class ObsSpaceImpl = typename OBS::ObsSpace>
-  static typename std::enable_if<!HasAssimVariables<ObsSpaceImpl>::value,
-                                  const ObsVariables &>::type
-  assimVariables(const ObsSpace<OBS> & space) { return space.obsspace().obsvariables(); }
-  ///@}
+  static const ObsVariables & assimVariables(const ObsSpace<OBS> & space) {
+    if constexpr (HasAssimVariables<typename OBS::ObsSpace>::value) {
+      return space.obsspace().assimvariables();
+    } else {
+      return space.obsspace().obsvariables();
+    }
+  }
   /// Narrow \p flags (sized over observed variables) to the assimilated-variable subset that
   /// Departures_/Observations_ use, via save/read since not every OBS backend supports indexing
   /// \p flags directly by variable.

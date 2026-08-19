@@ -202,6 +202,7 @@ void Observations<OBS>::perturb(const ObsErrors_ & Rmat) {
 // -----------------------------------------------------------------------------
 template <typename OBS>
 void Observations<OBS>::mask(const ObsDataVec_<int> & qcflags) {
+  ASSERT(obs_.size() == qcflags.size());
   for (size_t ii = 0; ii < obs_.size(); ++ii) {
     obs_[ii].mask(qcflags[ii]);
   }
