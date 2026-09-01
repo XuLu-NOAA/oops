@@ -22,11 +22,14 @@
 #include "oops/base/Departures.h"
 #include "oops/base/Geometry.h"
 #include "oops/base/Increment.h"
+#include "oops/base/LinearEnsembleObservers.h"
+#include "oops/base/NonlinearEnsembleObservers.h"
 #include "oops/base/Observations.h"
 #include "oops/base/ObsSpaces.h"
 #include "oops/base/StateSet.h"
 #include "oops/base/StateSetSaver.h"
 #include "oops/interface/GeometryIterator.h"
+#include "oops/interface/ObsDataVector.h"
 #include "oops/mpi/mpi.h"
 #include "oops/runs/Application.h"
 #include "oops/runs/Forecast.h"
@@ -48,6 +51,7 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
   typedef Increment<MODEL>                 Increment_;
   typedef IncrementSet<MODEL>              IncrementSet_;
   typedef LocalEnsembleSolver<MODEL, OBS>  LocalSolver_;
+  typedef ObsDataVector<OBS, int>          ObsDataInt_;
   typedef ObsSpaces<OBS>                   ObsSpaces_;
   typedef Observations<OBS>                Observations_;
   typedef Model<MODEL>                     Model_;
@@ -111,6 +115,13 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     } else {
       incvars += statevars;
     }
+    ASSERT_MSG(incvars <= statevars,
+               "increment variables must be a subset of the state variables");
+    // "companion" variables: state variables that are not analyzed (not part of incvars) and
+    // simply pass through the analysis untouched (e.g. physics fields when only wind is
+    // analyzed).
+    Variables companionvars(statevars);
+    companionvars -= incvars;
     StateSet_ bkg_mean = ens_xx.ens_mean();
     // if control member is present use that instead of the ensemble mean
     if (fullConfig.getBool("driver.use control member", false)) {
@@ -119,11 +130,6 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     }
 
     util::printRunStats("LocalEnsembleDA before solver ctor");
-
-    // set up solver
-    std::unique_ptr<LocalSolver_> solver =
-         LocalEnsembleSolverFactory<MODEL, OBS>::create(obsdb, *geometry, fullConfig,
-                                                        nens, bkg_mean, incvars);
 
     // test prints for the prior ensemble
     bool do_test_prints = fullConfig.getBool("driver.do test prints", true);
@@ -139,17 +145,48 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     util::printRunStats("LocalEnsembleDA before computeHofX");
 
     // compute H(x)
-    Observations_ yobs(obsdb, "ObsValue");
-    Observations_ yb_mean = solver->computeHofX(ens_xx, 0,
-                              fullConfig.getBool("driver.read HX from disk", false));
-    if (do_test_prints) {
-       Log::test() << "H(x) ensemble background mean: " << std::endl << yb_mean << std::endl;
-    }
-
-    Departures_ ombg(yobs - yb_mean);
-    ombg.save("ombg");
-    if (do_test_prints) {
-       Log::test() << "background y - H(x): " << std::endl << ombg << std::endl;
+    const std::string solverType = fullConfig.getString("local ensemble DA.solver");
+    // GETKF-family solvers need H(x) for the modulated ensemble (vertical localization
+    // eigenvector) perturbations in addition to the plain ensemble perturbations.
+    const bool isModulated = solverType.find("GETKF") != std::string::npos;
+    const bool useLinearObserver = fullConfig.getBool("local ensemble DA.use linear observer",
+                                                       false);
+    // If true, H(x)/QC/obs-error for iteration 0 were already computed by an earlier job (e.g.
+    // the observer half of a split-mode observer/solver pair) and are already present in the obs
+    // space (via obsdatain); skip recomputing them here. LocalEnsembleSolver (and, for GETKF,
+    // the modulated-ensemble read in GETKFSolver) already reads the needed hofx0_*/
+    // EffectiveError0/hofxm0_* fields from the obs space regardless of how they got there, so no
+    // further change is needed there.
+    const bool readHXFromDisk = fullConfig.getBool("driver.read HX from disk", false);
+    // QC flags established here (background, iteration 0) are carried over to the posterior
+    // observer (iteration 1) below, so that an observation excluded from the background
+    // diagnostics/assimilation stays excluded from the posterior ones too, rather than each
+    // ensemble observer independently (and potentially inconsistently) re-deriving its own QC
+    // decisions from a clean slate. They are saved to disk (rather than simply kept in memory)
+    // and immediately released because obsdb.redistribute() below refuses to run while any
+    // ObsDataVector remains attached to the obs space.
+    {
+      std::vector<ObsDataInt_> priorQcFlags;
+      if (readHXFromDisk) {
+        // Already-persisted QC from the iteration-0 observer (unaffected by this PR) stands in
+        // for the freshly-computed QC flags used below.
+        for (size_t jj = 0; jj < obsdb.size(); ++jj) {
+          ObsDataInt_ flags(obsdb[jj], obsdb[jj].obsvariables());
+          flags.read("EffectiveQC0");
+          priorQcFlags.push_back(flags);
+        }
+      } else if (useLinearObserver) {
+        LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
+            isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
+        ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
+        priorQcFlags = ensembleObservers.qcFlags();
+      } else {
+        NonlinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig,
+            nens, isModulated ? &bkg_mean : nullptr, isModulated ? &incvars : nullptr);
+        ensembleObservers.computeHofX(ens_xx, bkg_mean, 0);
+        priorQcFlags = ensembleObservers.qcFlags();
+      }
+      for (auto & flags : priorQcFlags) flags.save("PriorQcFlags");
     }
 
     // quit early if running in observer-only mode
@@ -158,22 +195,88 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
       return 0;
     }
 
+    obsdb.redistribute(obsConfig);
+
     // print background mean
     if (do_test_prints) {
       Log::test() << "Background mean :" << bkg_mean << std::endl;
     }
 
+    // set up solver after obsdb redistribution and before the memory-lever
+    // decisions below, since solver->canUpdateInPlace() is needed there.
+    std::unique_ptr<LocalSolver_> solver =
+         LocalEnsembleSolverFactory<MODEL, OBS>::create(obsdb, *geometry, fullConfig,
+                                                        nens, bkg_mean, incvars);
+
     std::vector<int> members(nens);
     std::iota(members.begin(), members.end(), 0);
 
-    // calculate background ensemble perturbations
-    IncrementSet_ bkg_pert(ens_xx, bkg_mean, incvars, members);
+    // The analysis member states are needed after the solver update only to
+    // write out the posterior ensemble and/or to run the posterior observer.
+    const bool needAnaStates =
+        fullConfig.getBool("driver.save posterior ensemble", true) ||
+        fullConfig.getBool("driver.do posterior observer", true);
+    // A strict, non-trivial subset release is possible when incvars is a proper subset of
+    // statevars (there are companion variables not touched by the analysis) and the model's
+    // State supports in-place variable-set resizing (State::updateFields). In that case each
+    // member state can be shrunk down to just the companion variables (instead of fully
+    // released) as soon as its incvars perturbation has been computed: the companion fields
+    // keep their original per-member values, so the full analysis state can later be
+    // reconstructed exactly (unlike a full release, which can only be reconstructed correctly
+    // when incvars spans the whole state).
+    const bool subsetRelease = needAnaStates && companionvars.size() > 0 &&
+        State_::supportsFieldSubsetting;
 
-    // initialize empty analysis perturbations
-    IncrementSet_ ana_pert(*geometry, incvars, ens_xx.times(), ens_xx.commTime(),
-                           members);
+    // The prior member states are not needed during the (memory intensive)
+    // solver update if the analysis members can be re-created afterwards from
+    // the mean and the analysis perturbations (increment variables spanning
+    // the full state), if the analysis member states are not needed at all
+    // (e.g. only analysis increments are written out), or if the companion
+    // (non-increment) variables can be retained in place while only the
+    // increment variables are released (subsetRelease). In these cases release
+    // each member state (fully, or down to just the companion variables) as
+    // soon as its perturbation has been computed, to remove one full (or
+    // partial) copy of the ensemble from the solver's peak memory.
+    const bool releaseEnsemble = (incvars == statevars) || !needAnaStates || subsetRelease;
+
+    // The analysis perturbations can overwrite the background perturbations in
+    // place, removing a second full ensemble copy from the solver's peak
+    // memory, when nothing downstream needs the background/analysis pair:
+    // no net-increment path (releaseEnsemble is true), no posterior-increment
+    // output, no prior-variance output, and a solver whose grid point update
+    // reads all local background data before writing (canUpdateInPlace).
+    const bool inPlaceUpdate = releaseEnsemble &&
+        !fullConfig.getBool("driver.save posterior ensemble increments", false) &&
+        !fullConfig.getBool("driver.save prior variance", false) &&
+        solver->canUpdateInPlace();
+
+    // initialize empty analysis perturbations, unless the update is done in
+    // place (constructed before the background perturbations: it queries the
+    // ensemble times, which must happen before the member states are released)
+    std::unique_ptr<IncrementSet_> ana_store;
+    if (!inPlaceUpdate) {
+      ana_store = std::make_unique<IncrementSet_>(*geometry, incvars, ens_xx.times(),
+                                                  ens_xx.commTime(), members);
+    }
+
+    // calculate background ensemble perturbations
+    IncrementSet_ bkg_pert = [&] {
+      if (subsetRelease) {
+        // shrink each member down to companionvars instead of fully releasing it
+        return IncrementSet_(ens_xx, bkg_mean, incvars, members, companionvars);
+      } else {
+        return IncrementSet_(ens_xx, bkg_mean, incvars, members, releaseEnsemble);
+      }
+    }();
+
+    // analysis perturbations: either updated in place of the background
+    // perturbations, or a separate set
+    IncrementSet_ & ana_pert = inPlaceUpdate ? bkg_pert : *ana_store;
 
     // run the solver at each gridpoint
+    Log::info() << "Updating analysis perturbations "
+                << (inPlaceUpdate ? "in place of" : "separately from")
+                << " the background perturbations" << std::endl;
     Log::info() << "Beginning core local solver..." << std::endl;
     util::printRunStats("LocalEnsembleDA before solver", true);
 
@@ -185,17 +288,26 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
 
     Log::info() << "Local solver completed." << std::endl;
     util::printRunStats("LocalEnsembleDA after solver", true);
-    // calculate final analysis states
-    if (incvars == statevars) {
-      // Initialize each ensemble member state from the background mean (per time slot)
-      for (size_t jj = 0; jj < nens; ++jj) {
-        for (size_t itime = 0; itime < ens_xx.time_size(); ++itime) {
-          ens_xx(itime, jj) = bkg_mean[itime];
-        }
-      }
-      // Apply all analysis perturbations across the ensemble/time set
+    // calculate final analysis states (only when they are needed downstream)
+    if (subsetRelease) {
+      // The companion variables were retained per member (shrunk, not released): grow each
+      // member back to the full variable set. The companion fields keep their original
+      // per-member values (moved, not copied); the incvars fields come back freshly
+      // zero-initialized (see fv3jedi update_fields / State::updateFields).
+      ens_xx.updateFields(statevars);
+      // Form the absolute analysis values (background mean + analysis perturbation) for the
+      // incvars fields only, in a copy so ana_pert itself is left untouched (it is still
+      // needed below, as a perturbation, for the increments/variance output).
+      IncrementSet_ bkg_mean_incvars(*geometry, incvars, bkg_mean);
+      IncrementSet_ ana_absolute(ana_pert);
+      ana_absolute += bkg_mean_incvars;
+      ens_xx += ana_absolute;
+    } else if (releaseEnsemble && needAnaStates) {
+      // Re-create each ensemble member state from the background mean and
+      // apply all analysis perturbations across the ensemble/time set
+      ens_xx.resetMembers(bkg_mean);
       ens_xx += ana_pert;
-    } else {
+    } else if (!releaseEnsemble) {
       // When increment variables differ, apply net analysis perturbations set-wise
       // by first forming analysis increments relative to background perturbations.
       IncrementSet_ net_ana(ana_pert);
@@ -224,8 +336,13 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
       }
     }
 
-    // save the posterior mean
-    StateSet_ ana_mean = ens_xx.ens_mean();   // calculate analysis mean
+    // calculate analysis mean; when the analysis member states were not
+    // re-created, compute it as background mean + ensemble mean of the
+    // analysis perturbations (mathematically equivalent)
+    StateSet_ ana_mean = needAnaStates ? ens_xx.ens_mean() : bkg_mean;
+    if (!needAnaStates) {
+      ana_mean += ana_pert.ens_mean();
+    }
     if (do_test_prints) {
       Log::test() << "Analysis mean :" << ana_mean << std::endl;
     }
@@ -308,22 +425,27 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     // than LETKF background/analysis perturbations.
     // hence one might not expect that oman and omaf are comparable
     if (fullConfig.getBool("driver.do posterior observer", true)) {
+      // read back the background QC flags saved above (see comment there for why they were
+      // saved to disk rather than simply kept around in memory)
+      std::vector<ObsDataInt_> priorQcFlags;
+      for (size_t jj = 0; jj < obsdb.size(); ++jj) {
+        ObsDataInt_ flags(obsdb[jj], obsdb[jj].obsvariables());
+        flags.read("PriorQcFlags");
+        priorQcFlags.push_back(flags);
+      }
       // need to create a posterior solver that stores ana_mean internally.
-      // This is needed if linear observer is used, because it is linearized arround this mean
-      std::unique_ptr<LocalSolver_> posteriorSolver =
-         LocalEnsembleSolverFactory<MODEL, OBS>::create(obsdb, *geometry, fullConfig,
-                                                        nens, ana_mean, incvars);
-      Observations_ ya_mean = posteriorSolver->computeHofX(ens_xx, 1, false);
-      Log::test() << "H(x) ensemble analysis mean: " << std::endl << ya_mean << std::endl;
-
-      // calculate analysis obs departures
-      Departures_ oman(yobs - ya_mean);
-      oman.save("oman");
-      Log::test() << "analysis y - H(x): " << std::endl << oman << std::endl;
-
-      // display overall background/analysis RMS stats
-      Log::test() << "ombg RMS: " << ombg.rms() << std::endl
-                << "oman RMS: " << oman.rms() << std::endl;
+      // This is needed if linear observer is used, because it is linearized around this mean.
+      // The posterior observer is never modulated, even for GETKF-family solvers.
+      if (useLinearObserver) {
+        LinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig, nens,
+            nullptr, nullptr, &priorQcFlags);
+        ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
+      } else {
+        NonlinearEnsembleObservers<MODEL, OBS> ensembleObservers(obsdb, *geometry, fullConfig,
+                                                                  nens, nullptr, nullptr,
+                                                                  &priorQcFlags);
+        ensembleObservers.computeHofX(ens_xx, ana_mean, 1);
+      }
     }
 
     // Save the obsspace only if an hofx was calculated
@@ -501,21 +623,38 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
       patchRadius = fmax(patchRadius, dist);
     }
 
-    // update observations configs with information on patch center and radius
+    // update observations configs with information on patch center and radius.
+    // Only set center/radius on whichever of "distribution"/"redistribution" the obs space's
+    // own config already declares: "distribution" is the original (pre-redistribution-feature)
+    // Halo-type distribution, kept for models/tests that have not opted into the new
+    // observer/solver redistribution machinery (which additionally requires the dataframe
+    // ioda backend); "redistribution" is the new, opt-in mechanism used to re-decompose obs
+    // (e.g. between a separate observer job and this solver job) across patches. Obs spaces
+    // that use neither (e.g. RoundRobin) are left untouched.
     std::vector<eckit::LocalConfiguration> obsConfigs = obsConfig.getSubConfigurations();
 
     if (obsConfigs.size() > 0) {
       for (auto & conf : obsConfigs) {
-        conf.set("obs space.distribution.center", patchCenter);
-        conf.set("obs space.distribution.radius", patchRadius);
+        setPatchGeometry(conf, patchCenter, patchRadius);
       }
 
       eckit::LocalConfiguration tmp;
       tmp.set("observers", obsConfigs);
       obsConfig = tmp.getSubConfiguration("observers");
     } else {
-      obsConfig.set("obs space.distribution.center", patchCenter);
-      obsConfig.set("obs space.distribution.radius", patchRadius);
+      setPatchGeometry(obsConfig, patchCenter, patchRadius);
+    }
+  }
+
+  void setPatchGeometry(eckit::LocalConfiguration & conf, const std::vector<double> & patchCenter,
+                        const double patchRadius) const {
+    if (conf.has("obs space.distribution")) {
+      conf.set("obs space.distribution.center", patchCenter);
+      conf.set("obs space.distribution.radius", patchRadius);
+    }
+    if (conf.has("obs space.redistribution")) {
+      conf.set("obs space.redistribution.center", patchCenter);
+      conf.set("obs space.redistribution.radius", patchRadius);
     }
   }
 
