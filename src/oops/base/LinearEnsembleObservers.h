@@ -138,7 +138,7 @@ void LinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
                                         - this->obspaces_.windowStart()) * 2;
   const ModelAux_ moderr(this->geometry_, eckit::LocalConfiguration());
   const ModelAuxInc_  moderrinc(this->geometry_, eckit::LocalConfiguration());
-  const ObsAux_  obsaux(this->obspaces_, this->observersconf_);
+  ObsAux_  obsaux(this->obspaces_, this->observersconf_);
   const ObsAuxInc_  obsauxinc(this->obspaces_, this->observersconf_);
 
   // set up postprocessors for the linear model run on ensemble perturbations

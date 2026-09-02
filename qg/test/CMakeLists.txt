@@ -15,12 +15,12 @@ list( APPEND qg_testinput
   testinput/4dvar_drpfom.yaml
   testinput/4dvar_drplanczos.yaml
   testinput/4dvar_drplanczos_hybrid.yaml
-  testinput/4dvar_forcing.yaml
+  #testinput/4dvar_forcing.yaml  # test is commented out
   testinput/4dvar_hybrid_linear_model.yaml
   testinput/4dvar_ipcg.yaml
   testinput/4dvar_obs_biased.yaml
   testinput/4dvar_rpcg.yaml
-  #testinput/4dvar_saddlepoint.yaml
+  #testinput/4dvar_saddlepoint.yaml  # test is commented out
   testinput/addincrement.yaml
   testinput/addincrement_scaled.yaml
   testinput/analytic_forecast.yaml
@@ -156,11 +156,11 @@ list( APPEND qg_testoutput
   testoutput/4dvar_drpfom.test
   testoutput/4dvar_drplanczos.test
   testoutput/4dvar_drplanczos_hybrid.test
-  testoutput/4dvar_forcing.test
+  #testoutput/4dvar_forcing.test  # test is commented out
   testoutput/4dvar_ipcg.test
   testoutput/4dvar_obs_biased.test
   testoutput/4dvar_rpcg.test
-  #testoutput/4dvar_saddlepoint.test
+  #testoutput/4dvar_saddlepoint.test  # test is commented out
   testoutput/analytic_forecast.test
   testoutput/convertincrement.test
   testoutput/convertincrement_inv.test
@@ -228,17 +228,17 @@ list( APPEND qg_testoutput
 # Create data directory for test input and symlink all files
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/testinput)
 foreach(FILENAME ${qg_testinput})
-    execute_process( COMMAND ${CMAKE_COMMAND} -E create_symlink
+    file( CREATE_LINK
            ${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-           ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} )
+           ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} SYMBOLIC )
 endforeach(FILENAME)
 
 # Create data directory for reference output and symlink all files
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/testoutput)
 foreach(FILENAME ${qg_testoutput})
-    execute_process( COMMAND ${CMAKE_COMMAND} -E create_symlink
+    file( CREATE_LINK
            ${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-           ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} )
+           ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} SYMBOLIC )
 endforeach(FILENAME)
 
 ecbuild_add_resources( TARGET   qg_test_scripts
@@ -328,9 +328,8 @@ ecbuild_add_test( TARGET  oops_qg_verticallocev
                   TEST_DEPENDS oops_qg_truth )
 
 ecbuild_add_test( TARGET  oops_qg_verticallocev_io
-                  SOURCES executables/TestVerticalLocEV.cc
+                  COMMAND oops_qg_verticallocev
                   ARGS    "testinput/verticallocev_io.yaml"
-                  LIBS    qg
                   TEST_DEPENDS oops_qg_truth oops_qg_verticallocev )
 
 ecbuild_add_test( TARGET  oops_qg_modelauxincrement
@@ -353,15 +352,13 @@ ecbuild_add_test( TARGET  oops_qg_linear_model
                   TEST_DEPENDS oops_qg_truth )
 
 ecbuild_add_test( TARGET  oops_qg_hybrid_linear_model
-                  SOURCES executables/TestLinearModel.cc
+                  COMMAND oops_qg_linear_model
                   ARGS    "testinput/hybrid_linear_model.yaml"
-                  LIBS    qg
                   TEST_DEPENDS oops_qg_gen_hybrid_linear_model_coeffs_with_subtimestep )
 
 ecbuild_add_test( TARGET  oops_qg_hybrid_linear_model_gen_ens
-                  SOURCES executables/TestLinearModel.cc
+                  COMMAND oops_qg_linear_model
                   ARGS    "testinput/hybrid_linear_model_gen_ens.yaml"
-                  LIBS    qg
                   TEST_DEPENDS oops_qg_forecast_5level_pert_heat )
 
 ecbuild_add_test( TARGET oops_qg_locations
@@ -546,10 +543,9 @@ ecbuild_add_test( TARGET  oops_qg_fieldset4D_seq
                   TEST_DEPENDS oops_qg_truth oops_qg_forecast )
 
 ecbuild_add_test( TARGET  oops_qg_fieldset4D_par
+                  COMMAND oops_qg_fieldset4D_seq
                   MPI     3
-                  SOURCES executables/TestFieldSet4D.cc
                   ARGS    "testinput/fieldset4D_par.yaml"
-                  LIBS    qg
                   TEST_DEPENDS oops_qg_truth oops_qg_forecast )
 
 #####################################################################

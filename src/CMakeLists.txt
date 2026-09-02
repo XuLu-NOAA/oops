@@ -3,9 +3,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 # macro to create a symlink from src to dst
 function(CREATE_SYMLINK src dst)
   foreach (FILENAME ${ARGN})
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E create_symlink
-      ${src}/${FILENAME} ${dst}/${FILENAME}
+    file( CREATE_LINK
+      ${src}/${FILENAME} ${dst}/${FILENAME} SYMBOLIC
     )
   endforeach(FILENAME)
 endfunction(CREATE_SYMLINK)
@@ -266,6 +265,7 @@ list(
   oops/generic/instantiateModelFactory.h
   oops/generic/LocalizationBase.h
   oops/generic/PseudoLinearModelIncrement4D.h
+  oops/generic/PseudoModel.cc
   oops/generic/PseudoModel.h
   oops/generic/PseudoModelState4D.h
   oops/generic/SimpleLinearModel.h
@@ -425,6 +425,7 @@ list(
   oops/util/ParallelFieldSetIO.cc
   oops/util/ParallelFieldSetIO.h
   oops/util/Printable.h
+  oops/util/PrintAdjTest.cc
   oops/util/PrintAdjTest.h
   oops/util/printRunStats.cc
   oops/util/printRunStats.h
@@ -1108,17 +1109,15 @@ if(BUILD_TESTING)
 
   ecbuild_add_test( TARGET  oops_util_parallelfieldsetio_2PE
                     MPI     2
-                    SOURCES test/util/ParallelFieldSetIO.cc
+                    COMMAND oops_util_parallelfieldsetio_1PE
                     ARGS    "test/testinput/parallelfieldsetio.yaml"
-                    DEPENDS oops_util_parallelfieldsetio_1PE
-                    LIBS    oops )
+                    DEPENDS oops_util_parallelfieldsetio_1PE )
 
   ecbuild_add_test( TARGET  oops_util_parallelfieldsetio_3PE
                     MPI     3
-                    SOURCES test/util/ParallelFieldSetIO.cc
+                    COMMAND oops_util_parallelfieldsetio_1PE
                     ARGS    "test/testinput/parallelfieldsetio.yaml"
-                    DEPENDS oops_util_parallelfieldsetio_1PE
-                    LIBS    oops )
+                    DEPENDS oops_util_parallelfieldsetio_1PE )
 
   ecbuild_add_executable(
     TARGET  oops_util_functionspace_helpers

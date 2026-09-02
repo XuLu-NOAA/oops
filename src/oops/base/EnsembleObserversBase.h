@@ -188,7 +188,7 @@ class EnsembleObserversBase {
   /// the observation operator about this trajectory).
   void computeHofX4D(const eckit::Configuration & config, const StateSet_ & xx, Observations_ & yy,
                      const util::Duration & flength, const util::Duration & default_tstep,
-                     const ObsAux_ & obsaux, const ModelAux_ & moderr,
+                     ObsAux_ & obsaux, const ModelAux_ & moderr,
                      ObsErrors_ & R, std::vector<ObsDataInt_> & qcflags,
                      const std::function<void(PostProcessor<State_> &)> & enrollTrajectory =
                          std::function<void(PostProcessor<State_> &)>());
@@ -236,7 +236,7 @@ template <typename MODEL, typename OBS>
 void EnsembleObserversBase<MODEL, OBS>::computeHofX4D(
     const eckit::Configuration & config, const StateSet_ & xx, Observations_ & yy,
     const util::Duration & flength, const util::Duration & default_tstep,
-    const ObsAux_ & obsaux, const ModelAux_ & moderr, ObsErrors_ & R,
+    ObsAux_ & obsaux, const ModelAux_ & moderr, ObsErrors_ & R,
     std::vector<ObsDataInt_> & qcflags,
     const std::function<void(PostProcessor<State_> &)> & enrollTrajectory) {
   // Setup pseudo model to run on the passed-in state
