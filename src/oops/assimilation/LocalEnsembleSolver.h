@@ -95,19 +95,9 @@ class LocalEnsembleSolver {
                       const Variables & incvars);
   virtual ~LocalEnsembleSolver() = default;
 
-  /// update background ensemble \p bg to analysis ensemble \p an for all points on this PE.
-  /// If canUpdateInPlace() returns true, \p an may alias \p bg (in-place update, halving the
-  /// ensemble memory): implementations must then read all local background data at a grid point
-  /// before writing any local analysis data at that grid point (the pack-to-Eigen-then-set
-  /// pattern used by the applyWeights implementations), and must not read background data at
-  /// grid points that have already been updated.
+  /// update background ensemble \p bg to analysis ensemble \p an for all points on this PE
   virtual void measurementUpdate(const IncrementSet_ & bg,
                                  IncrementSet_ & an);
-
-  /// whether the analysis perturbations may alias the background perturbations in
-  /// measurementUpdate (see above); solvers that re-read the original background
-  /// perturbations after updating the analysis must return false
-  virtual bool canUpdateInPlace() const {return true;}
 
   /// update background ensemble \p bg to analysis ensemble \p an at a grid point location \p i
   virtual void measurementUpdate(const Eigen::VectorXd &,
@@ -270,10 +260,10 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
   Observations_ yobs(obspaces_, "ObsValue");
   omb_ = yobs - ybmean_;
   R_.reset(new ObsErrors_(this->observersconf_, this->obspaces_));
-  Observations_ obserr(obspaces_, "EffectiveError0");
-  for (size_t jj = 0; jj < R_->size(); ++jj) {
-    (*R_)[jj].update(obserr[jj]);
-  }
+  // The errors that belong with the H(x) read above are the filter-modified ones the observer
+  // saved alongside it. Pick those up rather than leaving R as constructed from the ObsError
+  // group, which holds the unmodified errors provided with the observations.
+  R_->read("EffectiveError0");
   invVarR_ = std::make_unique<Departures_>(R_->inverseVariance());
   // Also exclude any observations with missing departures/H(x) values
   invVarR_->mask(omb_);

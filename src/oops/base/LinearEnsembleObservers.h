@@ -70,7 +70,6 @@ class LinearEnsembleObservers : public EnsembleObserversBase<MODEL, OBS> {
   using typename Base_::ModelAux_;
   using typename Base_::ObsAux_;
   using typename Base_::ObsErrors_;
-//XL  using typename Base_::ObsError_;
   using typename Base_::Observations_;
   using typename Base_::ObsSpaces_;
   using typename Base_::State_;
@@ -139,7 +138,7 @@ void LinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
                                         - this->obspaces_.windowStart()) * 2;
   const ModelAux_ moderr(this->geometry_, eckit::LocalConfiguration());
   const ModelAuxInc_  moderrinc(this->geometry_, eckit::LocalConfiguration());
-  const ObsAux_  obsaux(this->obspaces_, this->observersconf_);
+  ObsAux_  obsaux(this->obspaces_, this->observersconf_);
   const ObsAuxInc_  obsauxinc(this->obspaces_, this->observersconf_);
 
   // set up postprocessors for the linear model run on ensemble perturbations
@@ -173,9 +172,9 @@ void LinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_xx,
   linear_hofx_->finalizeTraj(this->qcflags_);
   y_mean_xb.save("hofx_y_mean_xb"+std::to_string(iteration));
 
-  // QC flags and Obs errors are set to that of the H(mean(Xb))
-//XL  this->R_->save("ObsErrors");
-  this->R_->save("ObsError");
+  // QC flags and Obs errors are set to that of the H(mean(Xb)). The filter-modified errors are
+  // already saved as EffectiveError<iteration> by the observer, so ObsError is left untouched
+  // (keeps the original errors in the file and works when ObsError is absent).
   this->initializeAssimilatedMask();
 
   // add linearized H(x) to the linear model postprocessor

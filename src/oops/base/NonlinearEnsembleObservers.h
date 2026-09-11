@@ -86,7 +86,7 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
   // processed in H(x).
   util::Duration default_tstep = (this->obspaces_.windowEnd() - this->obspaces_.windowStart()) * 2;
   const ModelAux_ moderr0(this->geometry_, eckit::LocalConfiguration());
-  const ObsAux_  obsaux0(this->obspaces_, this->observersconf_);
+  ObsAux_  obsaux0(this->obspaces_, this->observersconf_);
 
   // save QC filters, obs bias, ob errors for H(mean(Xb) (H(x_i) are saved separately)
   eckit::LocalConfiguration config;
@@ -100,8 +100,9 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
                       *this->R_, this->qcflags_);
   y_mean_xb.save("hofx_y_mean_xb"+std::to_string(iteration));
 
-  // QC flags and Obs errors are set to that of the H(mean(Xb))
-  this->R_->save("ObsError");
+  // QC flags and Obs errors are set to that of the H(mean(Xb)). The filter-modified errors are
+  // already saved as EffectiveError<iteration> by the observer, so ObsError is left untouched
+  // (keeps the original errors in the file and works when ObsError is absent).
   this->initializeAssimilatedMask();
 
   // save hofx means that hofx will be written out into ObsSpace;
@@ -141,7 +142,8 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
     default_tstep = (this->obspaces_.windowEnd() - this->obspaces_.windowStart()) * 2;
 
     const ModelAux_ moderr(this->geometry_, eckit::LocalConfiguration());
-    const ObsAux_  obsaux(this->obspaces_, this->observersconf_);
+    // Non-const: H(x) may cold-start VarBC coefficients that have no prior value.
+    ObsAux_  obsaux(this->obspaces_, this->observersconf_);
 
     // Construct a single-member StateSet and populate it from ens_xx
     StateSet_ member_xx(this->geometry_, ens_xx.variables(), times, ens_xx.commTime());
