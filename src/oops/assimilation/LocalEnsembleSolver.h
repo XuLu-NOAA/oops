@@ -99,6 +99,11 @@ class LocalEnsembleSolver {
   virtual void measurementUpdate(const IncrementSet_ & bg,
                                  IncrementSet_ & an);
 
+  /// whether the analysis perturbations may alias the background perturbations in
+  /// measurementUpdate (see above); solvers that re-read the original background
+  /// perturbations after updating the analysis must return false
+  virtual bool canUpdateInPlace() const {return true;}
+
   /// update background ensemble \p bg to analysis ensemble \p an at a grid point location \p i
   virtual void measurementUpdate(const Eigen::VectorXd &,
                                  const ObsErrors_ &,
