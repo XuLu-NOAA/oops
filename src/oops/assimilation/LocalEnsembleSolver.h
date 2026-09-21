@@ -99,9 +99,19 @@ class LocalEnsembleSolver {
   virtual Observations_ computeHofX(const StateSet_ & xx, size_t iteration,
                       bool readFromDisk);
 
-  /// update background ensemble \p bg to analysis ensemble \p an for all points on this PE
+  /// update background ensemble \p bg to analysis ensemble \p an for all points on this PE.
+  /// If canUpdateInPlace() returns true, \p an may alias \p bg (in-place update, halving the
+  /// ensemble memory): implementations must then read all local background data at a grid point
+  /// before writing any local analysis data at that grid point (the pack-to-Eigen-then-set
+  /// pattern used by the applyWeights implementations), and must not read background data at
+  /// grid points that have already been updated.
   virtual void measurementUpdate(const IncrementSet_ & bg,
                                  IncrementSet_ & an);
+
+  /// whether the analysis perturbations may alias the background perturbations in
+  /// measurementUpdate (see above); solvers that re-read the original background
+  /// perturbations after updating the analysis must return false
+  virtual bool canUpdateInPlace() const {return true;}
 
   /// update background ensemble \p bg to analysis ensemble \p an at a grid point location \p i
   virtual void measurementUpdate(const Eigen::VectorXd &,

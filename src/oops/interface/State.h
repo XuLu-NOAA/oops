@@ -14,9 +14,11 @@
 
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "eckit/config/Configuration.h"
+#include "eckit/exception/Exceptions.h"
 #include "oops/base/FieldSet3D.h"
 #include "oops/base/Geometry.h"
 #include "oops/base/Variables.h"
@@ -25,12 +27,26 @@
 #include "oops/util/Printable.h"
 #include "oops/util/Serializable.h"
 #include "oops/util/Timer.h"
+#include "oops/util/TypeTraits.h"
 
 namespace atlas {
   class FieldSet;
 }
 
 namespace oops {
+
+/// \brief Checks whether MODEL::State has method updateFields. Default: no.
+template<class, class = void>
+struct HasUpdateFields
+  : std::false_type {};
+
+/// \brief Checks whether MODEL::State has method updateFields. Specialization for the case
+///        when it does.
+template<class State>
+struct HasUpdateFields<State,
+       cpp17::void_t<decltype(std::declval<State>().updateFields(
+                                  std::declval<const Variables &>()))>>
+  : std::true_type {};
 
 namespace interface {
 
@@ -92,6 +108,31 @@ class State : public util::Printable,
   void zero();
   /// Accumulate (add \p w * \p x to the state)
   void accumul(const double & w, const State & x);
+
+  /// Whether the underlying MODEL::State supports resizing its variable set in place
+  /// (growing or shrinking, retaining the fields common to both the old and new sets).
+  /// Used to gate optimizations (e.g. the local ensemble DA partial-release memory
+  /// optimization) that are only available for models implementing updateFields.
+  static const bool supportsFieldSubsetting = HasUpdateFields<State_>::value;
+
+  /// Resize this State's variable set to \p vars in place: fields present in both the old
+  /// and new variable sets keep their data, fields dropped from the new set are deallocated,
+  /// and fields newly added are zero-initialized. Only available if supportsFieldSubsetting
+  /// is true (checked at compile time via MODEL::State).
+  ///@{
+  template<class St = State_>
+  typename std::enable_if<HasUpdateFields<St>::value>::type
+  updateFields(const Variables & vars) {
+    if (fset_) fset_.reset();
+    state_->updateFields(vars);
+  }
+  template<class St = State_>
+  typename std::enable_if<!HasUpdateFields<St>::value>::type
+  updateFields(const Variables &) {
+    throw eckit::NotImplemented("State::updateFields is not implemented for this model; "
+                                 "check supportsFieldSubsetting before calling", Here());
+  }
+  ///@}
 
   /// ATLAS FieldSet interface
   /// For models that are not using ATLAS fieldsets for their own State data:
