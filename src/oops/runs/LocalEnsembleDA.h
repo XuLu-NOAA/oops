@@ -102,9 +102,13 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     if (fullConfig.getBool("driver.update obs config with geometry info", true))
         updateConfigWithPatchGeometry(*geometry, obsConfig);
 
+    // Put modified observers back into the complete observations configuration
+    eckit::LocalConfiguration obsSpacesConfig(observationsConfig);
+    obsSpacesConfig.set("observers", obsConfig.getSubConfigurations());
+
     // Setup observations
     const eckit::mpi::Comm & time = oops::mpi::myself();
-    ObsSpaces_ obsdb(obsConfig, this->getComm(), timeWindow, time);
+    ObsSpaces_ obsdb(obsSpacesConfig, this->getComm(), timeWindow, time);
 
     // Read all ensemble members and compute the ensemble mean
     const size_t nens = ens_xx.ens_size();
