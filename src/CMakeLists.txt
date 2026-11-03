@@ -9,8 +9,11 @@ function(CREATE_SYMLINK src dst)
   endforeach(FILENAME)
 endfunction(CREATE_SYMLINK)
 
+configure_file( oops/util/oops_library_info.cc.in  oops/util/oops_library_info.cc )
+
 list(
   APPEND oops_src_files
+  ${CMAKE_CURRENT_BINARY_DIR}/oops/util/oops_library_info.cc
   oops/assimilation/BMatrix.h
   oops/assimilation/CMatrix.h
   oops/assimilation/ControlIncrement.h
@@ -32,6 +35,7 @@ list(
   oops/assimilation/CostJo.h
   oops/assimilation/CostPert.h
   oops/assimilation/CostTermBase.h
+  oops/assimilation/DFSCalculator.h
   oops/assimilation/DRGMRESRMinimizer.h
   oops/assimilation/DRIPCGMinimizer.h
   oops/assimilation/DRMinimizer.h
@@ -142,6 +146,7 @@ list(
   oops/base/Increment.h
   oops/base/Increment4D.h
   oops/base/IncrementSet.h
+  oops/base/IncrementWriter.h
   oops/base/Inflation.h
   oops/base/InflationBase.h
   oops/base/instantiateCovarFactory.h
@@ -195,6 +200,8 @@ list(
   oops/base/StateWriter.h
   oops/base/StructuredGridPostProcessor.h
   oops/base/StructuredGridWriter.h
+  oops/base/StructuredIncrementWriter.h
+  oops/base/StructuredStateWriter.h
   oops/base/TrajectorySaver.h
   oops/base/TrivialSamplingMethodSelector.h
   oops/base/variables_f.cc
@@ -254,6 +261,8 @@ list(
   oops/generic/GlobalInterpolator.cc
   oops/generic/GlobalInterpolator.h
   oops/generic/HtlmCalculator.h
+  oops/generic/HtlmCalculatorCore.cc
+  oops/generic/HtlmCalculatorCore.h
   oops/generic/HtlmEnsemble.h
   oops/generic/HtlmRegularization.cc
   oops/generic/HtlmRegularization.h
@@ -263,7 +272,11 @@ list(
   oops/generic/IdentityModel.h
   oops/generic/instantiateLinearModelFactory.h
   oops/generic/instantiateModelFactory.h
+  oops/generic/InterpolationCache.cc
+  oops/generic/InterpolationCache.h
   oops/generic/LocalizationBase.h
+  oops/generic/MaskedVectorFieldSet.cc
+  oops/generic/MaskedVectorFieldSet.h
   oops/generic/MeshTriangulation.h
   oops/generic/MeshTriangulation.cc
   oops/generic/ProximitySearch.cc
@@ -428,6 +441,7 @@ list(
   oops/util/ObjectCounter.h
   oops/util/ObjectCountHelper.cc
   oops/util/ObjectCountHelper.h
+  oops/util/oops_library_info.h
   oops/util/ParallelFieldSetIO.cc
   oops/util/ParallelFieldSetIO.h
   oops/util/Printable.h

@@ -95,6 +95,7 @@ class LocalEnsembleSolver {
                       const Variables & incvars);
   virtual ~LocalEnsembleSolver() = default;
 
+  /// update background ensemble \p bg to analysis ensemble \p an for all points on this PE
   virtual void measurementUpdate(const IncrementSet_ & bg,
                                  IncrementSet_ & an);
 
@@ -185,6 +186,7 @@ LocalEnsembleSolver<MODEL, OBS>::LocalEnsembleSolver(ObsSpaces_ & obspaces,
                                                      const Variables & incvars)
   : geometry_(geometry),
     obspaces_(obspaces),
+    ybmean_(obspaces_),
     omb_(obspaces_),
     ybmean_(obspaces_),
     inflopt_(config.getSubConfiguration("local ensemble DA.inflation")),

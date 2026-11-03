@@ -100,8 +100,8 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
                       *this->R_, this->qcflags_);
   y_mean_xb.save("hofx_y_mean_xb"+std::to_string(iteration));
 
-  // QC flags and Obs errors are set to that of the H(mean(Xb))
-  this->R_->save("ObsError");
+  // Set the assimilated mask from the QC flags of H(mean(Xb)). The matching obs errors are
+  // already saved by the observer as EffectiveError<iteration>.
   this->initializeAssimilatedMask();
 
   // save hofx means that hofx will be written out into ObsSpace;
@@ -189,9 +189,6 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
   // member, then using H(xxmean) (y_mean_xb) is expected by downstream applications
   if (this->nens_ == 1) {yb_mean = y_mean_xb;}
 
-  Observations_ yobs(this->obspaces_, "ObsValue");
-  Departures_ diff(yobs - yb_mean);
-
   // Make sure that obs missing/failed QC on any individual ensemble member are excluded from the
   // saved diagnostics too (mirrors develop's applyAssimilatedMask, moved here since ensemble
   // member H(x) is now computed by the observer rather than the solver).
@@ -200,21 +197,7 @@ void NonlinearEnsembleObservers<MODEL, OBS>::computeHofX(const StateSet_ & ens_x
     tmpDep = obsens[jj] - yb_mean;
     this->updateAssimilatedMask(tmpDep);
   }
-  this->updateAssimilatedMask(diff);
-  this->applyAssimilatedMask(yb_mean);
-  this->applyAssimilatedMask(diff);
-
-  this->maskWithPriorQcFlags(yb_mean);
-  this->maskWithPriorQcFlags(diff);
-
-  const std::string type = iteration == 0 ? "background" : "analysis";
-  const std::string group = iteration == 0 ? "ombg" : "oman";
-  Log::test() << "H(x) ensemble " << type << " mean: " << std::endl << yb_mean << std::endl;
-
-  diff.save(group);
-  Log::test() << type << " y - H(x): " << std::endl << diff << std::endl;
-  // display overall background/analysis RMS stats
-  Log::test() << group << " RMS: " << diff.rms() << std::endl;
+  this->finalizeMeanDiagnostics(yb_mean, iteration);
 }
 
 // -----------------------------------------------------------------------------

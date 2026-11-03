@@ -159,6 +159,30 @@ class EnsembleObserversBase {
     yy.mask(restrictToAssimVariables(qcflags_));
     if (!priorQcFlags_.empty()) yy.mask(restrictToAssimVariables(priorQcFlags_));
   }
+  /// Mask the ensemble-mean H(x) \p yb_mean and its departures from the observations with the
+  /// assimilated mask and QC flags, then save the departures and print both for \p iteration.
+  /// Shared by the linear and nonlinear observers so their saved diagnostics stay identical.
+  void finalizeMeanDiagnostics(Observations_ & yb_mean, const size_t iteration) {
+    Observations_ yobs(obspaces_, "ObsValue");
+    Departures_ diff(yobs - yb_mean);
+    // finish accumulating the assimilated mask with the ensemble-mean departure's own
+    // missingness, then apply it (mirrors develop's applyAssimilatedMask)
+    updateAssimilatedMask(diff);
+    applyAssimilatedMask(yb_mean);
+    applyAssimilatedMask(diff);
+
+    maskWithPriorQcFlags(yb_mean);
+    maskWithPriorQcFlags(diff);
+
+    const std::string type = iteration == 0 ? "background" : "analysis";
+    const std::string group = iteration == 0 ? "ombg" : "oman";
+    Log::test() << "H(x) ensemble " << type << " mean: " << std::endl << yb_mean << std::endl;
+
+    diff.save(group);
+    Log::test() << type << " y - H(x): " << std::endl << diff << std::endl;
+    // display overall background/analysis RMS stats
+    Log::test() << group << " RMS: " << diff.rms() << std::endl;
+  }
   /// \p space's assimvariables() where supported (see HasAssimVariables), else its obsvariables()
   /// (treating all observed variables as assimilated, for backends that don't distinguish them).
   static const ObsVariables & assimVariables(const ObsSpace<OBS> & space) {
