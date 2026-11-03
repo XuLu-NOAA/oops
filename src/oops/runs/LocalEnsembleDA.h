@@ -284,10 +284,6 @@ template <typename MODEL, typename OBS> class LocalEnsembleDA : public Applicati
     Log::info() << "Beginning core local solver..." << std::endl;
     util::printRunStats("LocalEnsembleDA before solver", true);
 
-        // set up solver
-    std::unique_ptr<LocalSolver_> solver =
-         LocalEnsembleSolverFactory<MODEL, OBS>::create(obsdb, *geometry, fullConfig,
-                                                        nens, bkg_mean, incvars);
     solver->measurementUpdate(bkg_pert, ana_pert);
 
     // wait all tasks to finish their solution, so the timing for functions below reports
